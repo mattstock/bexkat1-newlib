@@ -1109,6 +1109,9 @@ case "${target}" in
       noconfigdirs="$noconfigdirs target-newlib target-libgloss"
     fi
     ;;
+  bexkat1-*-*)
+    noconfigdirs="$noconfigdirs gprof"
+    ;;
   c4x-*-* | tic4x-*-*)
     noconfigdirs="$noconfigdirs target-libgloss"
     ;;

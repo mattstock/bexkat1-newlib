@@ -275,6 +275,14 @@
 #endif
 #endif
 
+#ifdef __bexkat1
+#ifdef __BEXKAT1_BIG_ENDIAN__
+#define __IEEE_BIG_ENDIAN
+#else
+#define __IEEE_LITTLE_ENDIAN
+#endif
+#endif
+
 #ifdef __CRX__
 #define __IEEE_LITTLE_ENDIAN
 #endif

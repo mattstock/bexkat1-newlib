@@ -87,6 +87,9 @@ case "${target}" in
   mn10300-*-*)
 	AC_CONFIG_SUBDIRS([mn10300])
 	;;
+  bexkat1-*-*)
+	AC_CONFIG_SUBDIRS([bexkat1])
+	;;
   bfin-*-*)
 	AC_CONFIG_SUBDIRS([bfin])
 	;;

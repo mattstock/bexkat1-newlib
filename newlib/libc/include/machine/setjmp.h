@@ -156,6 +156,10 @@ _BEGIN_STD_C
 #define _JBLEN 4
 #endif
 
+#ifdef __bexkat1
+#define _JBLEN 32
+#endif
+
 #ifdef  __sh__
 #if __SH5__
 #define _JBLEN 50

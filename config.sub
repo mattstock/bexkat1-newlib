@@ -257,6 +257,7 @@ case $basic_machine in
 	| ba \
 	| be32 | be64 \
 	| bfin \
+	| bexkat1 \
 	| c4x | c8051 | clipper \
 	| d10v | d30v | dlx | dsp16xx \
 	| e2k | epiphany \
@@ -542,6 +543,10 @@ case $basic_machine in
 	bluegene*)
 		basic_machine=powerpc-ibm
 		os=-cnk
+		;;
+	bexkat1)
+		basic_machine=bexkat1-unknown
+		os=-bexkat1000
 		;;
 	c54x-*)
 		basic_machine=tic54x-`echo $basic_machine | sed 's/^[^-]*-//'`
