@@ -1,4 +1,5 @@
 # Copyright (c) 2008, 2010 Anthony Green
+# Copyright (c) 2015 Matt Stock
 #
 # The authors hereby grant permission to use, copy, modify, distribute,
 # and license this software and its documentation for any purpose, provided
@@ -11,7 +12,7 @@
 # they apply.
 
 # Makefile for libgloss/spro. This is the board support code for the
-# moxie target.
+# bexkat1 target.
 
 DESTDIR =
 VPATH = @srcdir@ @srcdir@/..
@@ -80,6 +81,7 @@ stat.o: $(srcdir)/stat.c
 exit.o: $(srcdir)/exit.S
 
 install: ${CRT0_INSTALL} $($(CPU)_INSTALL)
+#	$(INSTALL_DATA) $(SIM_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(SIM_BSP)
 	for x in ${LD_SCRIPTS}; do \
 	  ${INSTALL_DATA} ${srcdir}/$$x $(DESTDIR)${tooldir}/lib/$$x; \
 	done;
