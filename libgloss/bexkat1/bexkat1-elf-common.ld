@@ -16,8 +16,7 @@
  * clearly indicated on the first page of each file where they apply.
  */
 
-OUTPUT_FORMAT("elf32-bigbexkat1", "elf32-bigbexkatq",
-              "elf32-littlebexkat1")
+OUTPUT_FORMAT("elf32-bexkat1-be", "elf32-bexkat1-be", "elf32-bexkat1-le")
 OUTPUT_ARCH(bexkat1)
 ENTRY(_start)
 SECTIONS

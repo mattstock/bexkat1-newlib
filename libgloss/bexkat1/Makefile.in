@@ -59,17 +59,31 @@ OBJCOPY = `if [ -f ${objroot}/../binutils/objcopy ] ; \
 	then echo ${objroot}/../binutils/objcopy ; \
 	else t='$(program_transform_name)'; echo objcopy | sed -e $$t ; fi`
 
-LD_SCRIPTS = bexkat1-elf-common.ld
+LD_SCRIPTS = bexkat1-elf-common.ld de2.ld
 
 @BUILD_CRT0_TRUE@CRT0		= crt0.o
 @BUILD_CRT0_TRUE@CRT0_INSTALL	= install-crt0
 @BUILD_CRT0_FALSE@CRT0		= 
 @BUILD_CRT0_FALSE@CRT0_INSTALL	= 
 
+DE2_BSP = libde2.a
+DE2_OBJS = fstat.o \
+           getpid.o \
+           isatty.o \
+           kill.o \
+           putnum.o \
+           sbrk.o \
+           exit.o \
+           stat.o
+
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
 
-all: ${CRT0}
+all: ${CRT0} ${DE2_BSP}
+
+$(DE2_BSP): $(DE2_OBJS)
+	$(AR) $(ARFLAGS) $@ $?
+	$(RANLIB) $@
 
 fstat.o: $(srcdir)/fstat.c
 getpid.o: $(srcdir)/getpid.c
@@ -79,9 +93,18 @@ putnum.o: $(srcdir)/putnum.c
 sbrk.o: $(srcdir)/sbrk.c
 stat.o: $(srcdir)/stat.c
 exit.o: $(srcdir)/exit.S
+close.o: $(srcdir)/close.S
+inbyte.o: $(srcdir)/inbyte.c
+lseek.o: $(srcdir)/lseek.c
+open.o: $(srcdir)/open.S
+read.o: $(srcdir)/read.S
+time.o: $(srcdir)/time.c
+unlink.o: $(srcdir)/unlink.S
+write.o: $(srcdir)/write.S
+stat.o: $(srcdir)/stat.c
 
 install: ${CRT0_INSTALL} $($(CPU)_INSTALL)
-#	$(INSTALL_DATA) $(SIM_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(SIM_BSP)
+	$(INSTALL_DATA) $(DE2_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(DE2_BSP)
 	for x in ${LD_SCRIPTS}; do \
 	  ${INSTALL_DATA} ${srcdir}/$$x $(DESTDIR)${tooldir}/lib/$$x; \
 	done;
