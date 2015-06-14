@@ -24,9 +24,9 @@ _start:
 	ldiu	%fp, 0	/* zero fp to allow unwinders to stop */
 
 	/* zero the bss area */
-	ldi	%0, __bss_start
+	ldi	%0, __bss_start__
 	ldiu	%1, 0
-	ldi	%2, _end
+	ldi	%2, __bss_end__
 	sub	%2, %2, %0
         push    %2
         push    %1
@@ -44,9 +44,8 @@ _start:
 	jsrd	atexit
 	
 	/* Set argc and argv.  These are populated by the simulator.  */
-	ldiu	%0, 0
-	push	%0
-	push	%0
+	ldiu	%0, 0x4
+	ldiu	%1, 0x8
 	
 	jsrd	main
 	jsrd	exit
