@@ -20,13 +20,13 @@
 	.type	__start,@function
 __start:
 _start:
-	ldd.l	%sp, _stack	/* set the top of stack */
+	ldi	%sp, _stack	/* set the top of stack */
 	ldiu	%fp, 0	/* zero fp to allow unwinders to stop */
 
 	/* zero the bss area */
-	ldd.l	%0, __bss_start__
+	ldi	%0, __bss_start__
 	ldiu	%1, 0
-	ldd.l	%2, __bss_end__
+	ldi	%2, __bss_end__
 	sub	%2, %2, %0
 	jsrd	memset
 
@@ -34,12 +34,12 @@ _start:
 	jsrd	_init
 	
 	/* Call _fini at exit time for static destructors.  */
-	ldd.l	%0, _fini
+	ldi	%0, _fini
 	jsrd	atexit
 	
 	/* Set argc and argv.  These are populated by the simulator.  */
-	ldd.l	%0, 0x4
-	ldd.l	%1, 0x8
+	ldiu	%0, 0x4
+	ldiu	%1, 0x8
 	
 	jsrd	main
 	jsrd	exit
