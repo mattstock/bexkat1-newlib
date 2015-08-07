@@ -24,9 +24,9 @@ _start:
 	ldiu	%fp, 0	/* zero fp to allow unwinders to stop */
 
 	/* zero the bss area */
-	ldi	%0, __bss_start__
+	ldi	%0, __bss_start
 	ldiu	%1, 0
-	ldi	%2, __bss_end__
+	ldi	%2, _end
 	sub	%2, %2, %0
         push    %2
         push    %1
