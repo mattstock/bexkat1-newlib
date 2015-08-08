@@ -74,7 +74,11 @@ DE2_OBJS = fstat.o \
            putnum.o \
            sbrk.o \
            exit.o \
-           stat.o
+           stat.o \
+           read.o \
+           write.o \
+           close.o \
+           lseek.o
 
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
@@ -93,14 +97,14 @@ putnum.o: $(srcdir)/putnum.c
 sbrk.o: $(srcdir)/sbrk.c
 stat.o: $(srcdir)/stat.c
 exit.o: $(srcdir)/exit.S
-close.o: $(srcdir)/close.S
+close.o: $(srcdir)/close.c
 inbyte.o: $(srcdir)/inbyte.c
 lseek.o: $(srcdir)/lseek.c
-open.o: $(srcdir)/open.S
-read.o: $(srcdir)/read.S
+open.o: $(srcdir)/open.c
+read.o: $(srcdir)/read.c
 time.o: $(srcdir)/time.c
-unlink.o: $(srcdir)/unlink.S
-write.o: $(srcdir)/write.S
+unlink.o: $(srcdir)/unlink.c
+write.o: $(srcdir)/write.c
 stat.o: $(srcdir)/stat.c
 
 install: ${CRT0_INSTALL} $($(CPU)_INSTALL)

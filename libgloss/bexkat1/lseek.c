@@ -1,5 +1,6 @@
-/* print.c -- print a string on the output device.
- *
+/*
+ * lseek.c -- write interface for moxie simulator
+ * 
  * Copyright (c) 2008 Anthony Green
  *
  * The authors hereby grant permission to use, copy, modify, distribute,
@@ -12,16 +13,20 @@
  * the new terms are clearly indicated on the first page of each file where
  * they apply.
  */
-#include "glue.h"
+
+#include <sys/types.h>
+#include <errno.h>
 
 /*
- * print -- do a raw print of a string
- */ 
-void
-_DEFUN (_print, (ptr),
-char *ptr)
+ * lseek -- Since a simulated serial port is non-seekable, we return
+ * an error.
+ */
+off_t
+_DEFUN (_lseek, (fd,  offset, whence),
+       int fd _AND
+       off_t offset _AND
+       int whence)
 {
-  while (*ptr) {
-    outbyte (*ptr++);
-  }
+  /*   errno = ESPIPE; */
+  return ((off_t)-1);
 }
