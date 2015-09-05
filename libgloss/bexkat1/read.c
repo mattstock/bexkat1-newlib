@@ -3,17 +3,11 @@
 static volatile unsigned int *serial0 = (unsigned int *)0x00800800;
 static volatile unsigned int *serial1 = (unsigned int *)0x00800808;
 
-char serial_getchar(unsigned port) {
+char inbyte() {
   unsigned result;
   volatile unsigned *p;
 
-  switch (port) {
-  case 3:
-    p = serial1;
-    break;
-  default:
-    p = serial0;
-  }
+  p = serial0;
 
   result  = p[0];
   while ((result & 0x8000) == 0)
@@ -21,11 +15,15 @@ char serial_getchar(unsigned port) {
   return (char)(result & 0xff); 
 }
 
-int _read(int file, char *ptr, int len) {
-  int idx = 0;
+int _read(int file, char *buf, int nbytes) {
+  int i = 0;
 
-  while (idx < len) {
-    ptr[idx++] = serial_getchar(file);
+  for (i = 0; i < nbytes; i++) {
+    *(buf + i) = inbyte();
+    if ((*(buf + i) == '\n') || (*(buf + i) == '\r')) {
+      i++;
+      break;
+    }
   }
-  return len;
+  return (i);
 }
