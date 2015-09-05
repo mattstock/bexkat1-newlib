@@ -655,7 +655,7 @@ case "${host}" in
 	;;
   bexkat1-*-elf*)
         syscall_dir=syscalls
-	default_newlib_io_long_long="yes"
+#	default_newlib_io_long_long="yes"
         ;;
   bfin*)
 	syscall_dir=syscalls
