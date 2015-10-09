@@ -112,6 +112,7 @@ case "${host_cpu}" in
 	;;
   bexkat1)
 	machine_dir=bexkat1
+	libm_machine_dir=bexkat1
         ;;
   bfin)
 	machine_dir=bfin
