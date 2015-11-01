@@ -78,6 +78,10 @@ DE2_OBJS = fstat.o \
            read.o \
            write.o \
            close.o \
+           open.o \
+           gettimeofday.o \
+           mkdir.o \
+           access.o \
            lseek.o
 
 #### Host specific Makefile fragment comes in here.
@@ -91,6 +95,7 @@ $(DE2_BSP): $(DE2_OBJS)
 
 fstat.o: $(srcdir)/fstat.c
 getpid.o: $(srcdir)/getpid.c
+gettimeofday.o: $(srcdir)/gettimeofday.c
 isatty.o: $(srcdir)/isatty.c
 kill.o: $(srcdir)/kill.c
 putnum.o: $(srcdir)/putnum.c
@@ -102,6 +107,7 @@ inbyte.o: $(srcdir)/inbyte.c
 lseek.o: $(srcdir)/lseek.c
 open.o: $(srcdir)/open.c
 read.o: $(srcdir)/read.c
+access.o: $(srcdir)/access.c
 time.o: $(srcdir)/time.c
 unlink.o: $(srcdir)/unlink.c
 write.o: $(srcdir)/write.c
