@@ -28,6 +28,9 @@ _start:
 	ldiu	%1, 0
 	ldi	%2, _end
 	sub	%2, %2, %0
+        push    %2
+        push    %1
+        push    %0
 	jsrd	memset
 
         /* adjust the interrupt vectors */
