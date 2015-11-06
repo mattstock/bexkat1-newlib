@@ -67,22 +67,16 @@ LD_SCRIPTS = bexkat1-elf-common.ld de2.ld
 @BUILD_CRT0_FALSE@CRT0_INSTALL	= 
 
 DE2_BSP = libde2.a
-DE2_OBJS = fstat.o \
+DE2_OBJS = fileio.o \
            getpid.o \
            isatty.o \
            kill.o \
            putnum.o \
            sbrk.o \
            exit.o \
-           stat.o \
-           read.o \
-           write.o \
-           close.o \
-           open.o \
-           gettimeofday.o \
-           mkdir.o \
-           access.o \
-           lseek.o
+           spi.o \
+           rtc.o \
+           gettimeofday.o
 
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
@@ -93,25 +87,18 @@ $(DE2_BSP): $(DE2_OBJS)
 	$(AR) $(ARFLAGS) $@ $?
 	$(RANLIB) $@
 
-fstat.o: $(srcdir)/fstat.c
 getpid.o: $(srcdir)/getpid.c
 gettimeofday.o: $(srcdir)/gettimeofday.c
 isatty.o: $(srcdir)/isatty.c
 kill.o: $(srcdir)/kill.c
 putnum.o: $(srcdir)/putnum.c
 sbrk.o: $(srcdir)/sbrk.c
-stat.o: $(srcdir)/stat.c
+fileio.o: $(srcdir)/fileio.c
 exit.o: $(srcdir)/exit.S
-close.o: $(srcdir)/close.c
 inbyte.o: $(srcdir)/inbyte.c
-lseek.o: $(srcdir)/lseek.c
-open.o: $(srcdir)/open.c
-read.o: $(srcdir)/read.c
-access.o: $(srcdir)/access.c
 time.o: $(srcdir)/time.c
-unlink.o: $(srcdir)/unlink.c
-write.o: $(srcdir)/write.c
-stat.o: $(srcdir)/stat.c
+rtc.o: $(srcdir)/rtc.c
+spi.o: $(srcdir)/spi.c
 
 install: ${CRT0_INSTALL} $($(CPU)_INSTALL)
 	$(INSTALL_DATA) $(DE2_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(DE2_BSP)
