@@ -6,6 +6,45 @@
 #include "rtc.h"
 #include <stdio.h>
 
+// time2fat
+int time2fat(time_t now) {
+  struct tm ts;
+  int timeval;
+
+  ts = *localtime(&now);
+  timeval = (ts.tm_year - 80) << 25;
+  timeval |= (ts.tm_mon + 1) << 21;
+  timeval |= ts.tm_mday << 16;
+  timeval |= ts.tm_hour << 11;
+  timeval |= ts.tm_min << 5;
+  timeval |= ts.tm_sec >> 1;
+  return timeval;
+}
+
+// fat2time
+time_t fat2time(int fatdate, int fattime) {
+  struct tm timeval;
+
+  timeval.tm_sec = (fattime & 0x1f) << 2;
+  fattime >>= 5;
+  timeval.tm_min = (fattime & 0x1f);
+  fattime >>= 5;
+  timeval.tm_hour = (fattime & 0x1f);
+  fattime >>= 5;
+  timeval.tm_mday = (fatdate & 0x1f);
+  fatdate >>= 5;
+  timeval.tm_mon = (fatdate & 0xf) - 1;
+  fatdate >>= 4;
+  timeval.tm_year = (fatdate & 0x4f) + 80;
+
+  return mktime(&timeval);
+}
+
+// Used by the FAT library
+int get_fattime(void) {
+  return time2fat(time(0));
+}
+
 int
 _DEFUN (_times, _times (buf),
 	struct tms *buf)
