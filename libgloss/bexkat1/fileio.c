@@ -303,7 +303,7 @@ _DEFUN (_lseek, (fd, offset, whence),
 }
 
 int
-_DEFUN (_access, (path, mode),
+_DEFUN (access, (path, mode),
 	const char *path _AND
 	int mode)
 {
@@ -311,7 +311,7 @@ _DEFUN (_access, (path, mode),
 }
 
 int
-_DEFUN (_mkdir, (path, mode),
+_DEFUN (mkdir, (path, mode),
 	const char *path _AND
 	mode_t mode)
 {
