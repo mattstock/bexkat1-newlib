@@ -656,6 +656,7 @@ case "${host}" in
 	;;
   bexkat1-*-elf*)
         syscall_dir=syscalls
+	newlib_cflags="${newlib_cflags} -DHAVE_NANOSLEEP"
 #	default_newlib_io_long_long="yes"
         ;;
   bfin*)

@@ -81,6 +81,8 @@ DE2_OBJS = fileio.o \
            misc.o \
            mmc.o \
            ff.o \
+           usleep.o \
+           vectors.o
 
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
