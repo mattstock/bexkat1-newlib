@@ -1,5 +1,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -59,8 +60,7 @@ int fatfs_open(const char *path,
     return -1;
   }
 
-  if (flags & O_RDONLY)
-    fat_flags |= FA_READ;
+  fat_flags = FA_READ;
   if (flags & O_WRONLY)
     fat_flags |= FA_WRITE;
   if (flags & O_RDWR)
