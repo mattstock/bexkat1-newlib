@@ -44,8 +44,9 @@ _start:
 	jsrd	atexit
 	
 	/* Set argc and argv.  These are populated by the simulator.  */
-	ldiu	%0, 0x4
-	ldiu	%1, 0x8
+	ldiu	%0, 0
+	push	%0
+	push	%0
 	
 	jsrd	main
 	jsrd	exit
