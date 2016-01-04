@@ -72,17 +72,17 @@ _DEFUN (_time, _time (t),
     if (val & 0x20)
       tm.tm_hour += 12;
   } else {
-    if (val & 0x10)
-      tm.tm_hour += 10;
     if (val & 0x20)
       tm.tm_hour += 20;
   }
 
-  tm.tm_wday = BCD2DEC(rtc_cmd(RTC_DAY_OF_WEEK,0x00)) - 1;
+  tm.tm_wday = BCD2DEC(rtc_cmd(RTC_DAY_OF_WEEK,0x00)) + 1;
   tm.tm_mday = BCD2DEC(rtc_cmd(RTC_DATE_OF_MONTH, 0x00));
   val = rtc_cmd(RTC_MONTH, 0x00);
   tm.tm_mon = BCD2DEC(val & 0x1f) - 1;
-  tm.tm_year = BCD2DEC(rtc_cmd(RTC_YEAR, 0x00)) + 100*((val&0x80) >> 7);
+  tm.tm_year = BCD2DEC(rtc_cmd(RTC_YEAR, 0x00));
+  if (val & 0x80)
+    tm.tm_year += 100;
 
   tm.tm_isdst = -1;
 

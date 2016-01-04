@@ -3,7 +3,7 @@
 
 #include "spi.h"
 
-#define BCD2DEC(x) (((x >> 4)&0xf)*10 + (x&0xf))
+#define BCD2DEC(x) ((((x) >> 4)&0xf)*10 + ((x)&0xf))
 
 #define RTC_SECONDS       0x00
 #define RTC_MINUTES       0x01
