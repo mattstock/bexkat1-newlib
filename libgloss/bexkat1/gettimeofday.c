@@ -40,19 +40,6 @@ time_t fat2time(int fatdate, int fattime) {
   return mktime(&timeval);
 }
 
-// Used by the FAT library
-int get_fattime(void) {
-  return time2fat(time(0));
-}
-
-int
-_DEFUN (_times, _times (buf),
-	struct tms *buf)
-{
-  errno = EINVAL;
-  return (-1);
-}
-
 /*
  * time -- return current time in seconds.
  */

@@ -71,18 +71,10 @@ DE2_OBJS = fileio.o \
            getpid.o \
            isatty.o \
            kill.o \
-           putnum.o \
            sbrk.o \
            exit.o \
-           spi.o \
-           rtc.o \
            gettimeofday.o \
-           serial.o \
-           misc.o \
-           mmc.o \
-           ff.o \
-           usleep.o \
-           vectors.o
+           usleep.o
 
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
@@ -101,14 +93,6 @@ putnum.o: $(srcdir)/putnum.c
 sbrk.o: $(srcdir)/sbrk.c
 fileio.o: $(srcdir)/fileio.c
 exit.o: $(srcdir)/exit.S
-inbyte.o: $(srcdir)/inbyte.c
-time.o: $(srcdir)/time.c
-rtc.o: $(srcdir)/rtc.c
-spi.o: $(srcdir)/spi.c
-serial.o: $(srcdir)/serial.c
-misc.o: $(srcdir)/misc.c
-mmc.o: $(srcdir)/mmc.c
-ff.o: $(srcdir)/ff.c
 
 install: ${CRT0_INSTALL} $($(CPU)_INSTALL)
 	$(INSTALL_DATA) $(DE2_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(DE2_BSP)
