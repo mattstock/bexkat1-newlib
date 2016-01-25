@@ -230,6 +230,5 @@ SECTIONS
   .debug_funcnames 0 : { *(.debug_funcnames) }
   .debug_typenames 0 : { *(.debug_typenames) }
   .debug_varnames  0 : { *(.debug_varnames) }
-  .stack 0x08000000 : { _stack = .; *(.stack) }
   /* These must appear regardless of  .  */
 }
