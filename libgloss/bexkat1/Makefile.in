@@ -68,11 +68,11 @@ LD_SCRIPTS = bexkat1-elf-common.ld de2.ld de1.ld de1.specs de2.specs
 
 DE2_BSP  = libde2.a
 DE2_SCRIPTS = de2.specs
-DE2_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o de2stack.o
+DE2_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o de2stack.o syscalls.o
 
 DE1_BSP  = libde1.a
 DE1_SCRIPTS = de1.specs
-DE1_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o de1stack.o
+DE1_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o de1stack.o syscalls.o
 
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
@@ -94,6 +94,7 @@ kill.o: $(srcdir)/kill.c
 putnum.o: $(srcdir)/putnum.c
 sbrk.o: $(srcdir)/sbrk.c
 fileio.o: $(srcdir)/fileio.c
+syscalls.o: $(srcdir)/syscalls.c
 exit.o: $(srcdir)/exit.S
 de1stack.o: $(srcdir)/de1stack.S
 de2stack.o: $(srcdir)/de2stack.S
