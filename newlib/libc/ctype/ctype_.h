@@ -6,7 +6,7 @@
 
 #ifdef ALLOW_NEGATIVE_CTYPE_INDEX
 
-  extern char _ctype_b[];
+  extern const char _ctype_b[];
 # define DEFAULT_CTYPE_PTR	((char *) _ctype_b + 127)
 
 #else	/* !ALLOW_NEGATIVE_CTYPE_INDEX */
