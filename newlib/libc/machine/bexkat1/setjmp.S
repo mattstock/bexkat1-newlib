@@ -16,23 +16,23 @@
 	.global	setjmp
 	.type	setjmp,@function
 setjmp:
-	st.l	%0,     (%0)
-	st.l	%1, 0x04(%0)
-	st.l	%2, 0x08(%0)
-	st.l	%3, 0x0c(%0)
-	st.l	%4, 0x10(%0)
-	st.l	%5, 0x14(%0)
-	st.l	%6, 0x18(%0)
-	st.l	%7, 0x1c(%0)
-	st.l	%8, 0x20(%0)
-	st.l	%9, 0x24(%0)
-	st.l	%10, 0x28(%0)
-	st.l	%11, 0x2c(%0)
-	st.l	%12, 0x30(%0)
-	st.l	%13, 0x34(%0)
-	st.l	%fp, 0x38(%0)
-	st.l	%sp, 0x3c(%0)
-	ldiu	%0, 0
+	ld.l    %12, 8(%sp)
+	st.l	%0, (%12)
+	st.l	%1, 0x04(%12)
+	st.l	%2, 0x08(%12)
+	st.l	%3, 0x0c(%12)
+	st.l	%4, 0x10(%12)
+	st.l	%5, 0x14(%12)
+	st.l	%6, 0x18(%12)
+	st.l	%7, 0x1c(%12)
+	st.l	%8, 0x20(%12)
+	st.l	%9, 0x24(%12)
+	st.l	%10, 0x28(%12)
+	st.l	%11, 0x2c(%12)
+	st.l	%13, 0x30(%12)
+	st.l	%fp, 0x34(%12)
+	st.l	%sp, 0x38(%12)
+	ldiu	%12, 0
 	rts
 .Lend1:
 	.size	setjmp,.Lend1-setjmp
@@ -40,42 +40,45 @@ setjmp:
 	.global	longjmp
 	.type	longjmp,@function
 longjmp:
-	ldiu	%2, 0x00
-	cmp	%1, %2
+	ld.l    %12, 12(%sp)
+	ldiu	%1, 0x00
+	cmp	%1, %12
 	beq	.Lreturn1
-	ld.l	%1, 0x04(%0)
-	ld.l	%2, 0x08(%0)
-	ld.l	%3, 0x0c(%0)
-	ld.l	%4, 0x10(%0)
-	ld.l	%5, 0x14(%0)
-	ld.l	%6, 0x18(%0)
-	ld.l	%7, 0x1c(%0)
-	ld.l	%8, 0x20(%0)
-	ld.l	%9, 0x24(%0)
-	ld.l	%10, 0x28(%0)
-	ld.l	%11, 0x2c(%0)
-	ld.l	%12, 0x30(%0)
-	ld.l	%13, 0x34(%0)
-	ld.l	%fp, 0x38(%0)
-	ld.l	%sp, 0x3c(%0)
+	ld.l    %12, 8(%sp)
+	ld.l	%0, (%12)
+	ld.l	%1, 0x04(%12)
+	ld.l	%2, 0x08(%12)
+	ld.l	%3, 0x0c(%12)
+	ld.l	%4, 0x10(%12)
+	ld.l	%5, 0x14(%12)
+	ld.l	%6, 0x18(%12)
+	ld.l	%7, 0x1c(%12)
+	ld.l	%8, 0x20(%12)
+	ld.l	%9, 0x24(%12)
+	ld.l	%10, 0x28(%12)
+	ld.l	%11, 0x2c(%12)
+	ld.l	%13, 0x30(%12)
+	ld.l	%fp, 0x34(%12)
+	ld.l	%sp, 0x38(%12)
 	rts
 .Lreturn1:
-	ld.l	%1, 0x04(%0)
-	ld.l	%2, 0x08(%0)
-	ld.l	%3, 0x0c(%0)
-	ld.l	%4, 0x10(%0)
-	ld.l	%5, 0x14(%0)
-	ld.l	%6, 0x18(%0)
-	ld.l	%7, 0x1c(%0)
-	ld.l	%8, 0x20(%0)
-	ld.l	%9, 0x24(%0)
-	ld.l	%10, 0x28(%0)
-	ld.l	%11, 0x2c(%0)
-	ld.l	%12, 0x30(%0)
-	ld.l	%13, 0x34(%0)
-	ld.l	%fp, 0x38(%0)
-	ld.l	%sp, 0x3c(%0)
-	ldiu	%0, 0x01
+	ld.l    %12, 8(%sp)
+	ld.l	%0, (%12)
+	ld.l	%1, 0x04(%12)
+	ld.l	%2, 0x08(%12)
+	ld.l	%3, 0x0c(%12)
+	ld.l	%4, 0x10(%12)
+	ld.l	%5, 0x14(%12)
+	ld.l	%6, 0x18(%12)
+	ld.l	%7, 0x1c(%12)
+	ld.l	%8, 0x20(%12)
+	ld.l	%9, 0x24(%12)
+	ld.l	%10, 0x28(%12)
+	ld.l	%11, 0x2c(%12)
+	ldiu	%12, 0
+	ld.l	%13, 0x30(%12)
+	ld.l	%fp, 0x34(%12)
+	ld.l	%sp, 0x38(%0)
 	rts
 .Lend2:
 	.size	longjmp,.Lend2-longjmp
