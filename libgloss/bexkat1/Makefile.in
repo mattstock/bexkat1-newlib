@@ -59,7 +59,7 @@ OBJCOPY = `if [ -f ${objroot}/../binutils/objcopy ] ; \
 	then echo ${objroot}/../binutils/objcopy ; \
 	else t='$(program_transform_name)'; echo objcopy | sed -e $$t ; fi`
 
-LD_SCRIPTS = bexkat1-elf-common.ld de2.ld de1.ld de1.specs de2.specs
+LD_SCRIPTS = bexkat1-elf-common.ld de2.ld de1.ld de1.specs de2.specs max10.ld max10.specs
 
 @BUILD_CRT0_TRUE@CRT0		= crt0.o
 @BUILD_CRT0_TRUE@CRT0_INSTALL	= install-crt0
@@ -74,10 +74,18 @@ DE1_BSP  = libde1.a
 DE1_SCRIPTS = de1.specs
 DE1_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o de1stack.o syscalls.o
 
+MAX10_BSP  = libmax10.a
+MAX10_SCRIPTS = max10.specs
+MAX10_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o de1stack.o syscalls.o
+
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
 
-all: ${CRT0} ${DE2_BSP} ${DE1_BSP}
+all: ${CRT0} ${DE2_BSP} ${DE1_BSP} ${MAX10_BSP}
+
+$(MAX10_BSP): $(MAX10_OBJS)
+	$(AR) $(ARFLAGS) $@ $?
+	$(RANLIB) $@
 
 $(DE2_BSP): $(DE2_OBJS)
 	$(AR) $(ARFLAGS) $@ $?
@@ -99,9 +107,10 @@ exit.o: $(srcdir)/exit.S
 de1stack.o: $(srcdir)/de1stack.S
 de2stack.o: $(srcdir)/de2stack.S
 
-install: ${CRT0_INSTALL} ${DE2_INSTALL} ${DE1_INSTALL}
+install: ${CRT0_INSTALL} ${DE2_INSTALL} ${DE1_INSTALL} ${MAX10_INSTALL}
 	$(INSTALL_DATA) $(DE2_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(DE2_BSP)
 	$(INSTALL_DATA) $(DE1_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(DE1_BSP)
+	$(INSTALL_DATA) $(MAX10_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(MAX10_BSP)
 	for x in ${LD_SCRIPTS}; do \
 	  ${INSTALL_DATA} ${srcdir}/$$x $(DESTDIR)${tooldir}/lib/$$x; \
 	done;
