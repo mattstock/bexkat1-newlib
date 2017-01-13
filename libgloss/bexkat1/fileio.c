@@ -8,9 +8,11 @@
 #include "glue.h"
 #include "serial.h"
 #include "misc.h"
+#if 0
 #include "ff.h"
 
 extern time_t fat2time(int fatdate, int fattime);
+#endif
 
 typedef struct {
   const char *name;
@@ -46,6 +48,7 @@ int nop_fstat(int fd, struct stat *buf) {
   return (0);
 }
 
+#if 0
 /* for FatFS, keep the various records we need statically */
 static FATFS fatfs_fatfs;
 static FIL fatfs_fils[1];
@@ -239,6 +242,8 @@ int fatfs_mkdir(const char *path, mode_t mode) {
   return -1;
 }
 
+#endif
+
 int serial_read(int fd, char *ptr, int len) {
   int i = 0;
 
@@ -277,20 +282,20 @@ const driver_t driver_serial1 = { "serial1",
 				  nop_fstat,
 				  nop_lseek };
 
-const driver_t driver_fatfs = { "fatfs",
+/*const driver_t driver_fatfs = { "fatfs",
 				fatfs_open,
 				fatfs_close,
 				fatfs_read,
 				fatfs_write,
 				fatfs_fstat,
 				fatfs_lseek };
+*/
 
 const driver_t *driver_list[] = {
   &driver_serial0, /* stdin */
   &driver_serial0, /* stdout */
   &driver_serial0, /* stderr */
-  &driver_serial1, /* 3 */
-  &driver_fatfs    /* 4 - right now only one file open at a time */
+  &driver_serial1 /* 3 */
 };
 
 off_t
@@ -302,6 +307,7 @@ _DEFUN (_lseek, (fd, offset, whence),
   return driver_list[fd]->lseek(fd, offset, whence);
 }
 
+#if 0
 int
 _DEFUN (access, (path, mode),
 	const char *path _AND
@@ -325,6 +331,7 @@ _DEFUN (_stat, (path, buf),
 {
   return fatfs_stat(path, buf);
 }
+#endif
 
 int
 _DEFUN (_fstat, (fd, buf),
@@ -349,7 +356,7 @@ _DEFUN (_open, (path, flags, mode),
 {
   int i;
   int fd = 4;
-  for (i=0; i < 5; i++) {
+  for (i=0; i < 4; i++) {
     if (!strcmp(driver_list[i]->name, path)) {
       fd = i;
       break;

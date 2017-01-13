@@ -33,9 +33,6 @@ _start:
         push    %0
 	jsrd	memset
 
-        /* adjust the interrupt vectors */
-	setint  _vectors_start
-
 	/* Call _init to invoke static constructors, etc.  */
 	jsrd	_init
 	
