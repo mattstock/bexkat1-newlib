@@ -893,9 +893,19 @@ peek_console (select_record *me, bool)
 	fh->send_winch_maybe ();
 	if (irec.EventType == KEY_EVENT)
 	  {
-	    if (irec.Event.KeyEvent.bKeyDown
-		&& (irec.Event.KeyEvent.uChar.AsciiChar
-		    || fhandler_console::get_nonascii_key (irec, tmpbuf)))
+	    if (irec.Event.KeyEvent.bKeyDown)
+	      {
+		/* Ignore Alt+Numpad keys. They are eventually handled in the
+		   key-up case below. */
+		if (is_alt_numpad_key (&irec))
+		   ;
+		/* Handle normal input. */
+		else if (irec.Event.KeyEvent.uChar.UnicodeChar
+			 || fhandler_console::get_nonascii_key (irec, tmpbuf))
+		  return me->read_ready = true;
+	      }
+	    /* Ignore key up events, except for Alt+Numpad events. */
+	    else if (is_alt_numpad_event (&irec))
 	      return me->read_ready = true;
 	  }
 	else

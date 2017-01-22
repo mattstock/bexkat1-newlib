@@ -8,168 +8,13 @@ details. */
 
 #include "winsup.h"
 #include "miscfuncs.h"
+#include <ntsecapi.h>
 #include <sys/uio.h>
-#include <assert.h>
-#include <alloca.h>
-#include <limits.h>
 #include <sys/param.h>
-#include <wchar.h>
-#include "cygtls.h"
 #include "ntdll.h"
 #include "path.h"
 #include "fhandler.h"
-#include "dtable.h"
-#include "cygheap.h"
-#include "pinfo.h"
 #include "exception.h"
-#include "sigproc.h"
-
-long tls_ix = -1;
-
-const unsigned char case_folded_lower[] = {
-   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
-  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
-  32, '!', '"', '#', '$', '%', '&',  39, '(', ')', '*', '+', ',', '-', '.', '/',
- '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
- '@', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
- 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '[',  92, ']', '^', '_',
- '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
- 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~', 127,
- 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
- 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
- 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
- 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
- 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
- 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
- 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
- 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
-};
-
-const unsigned char case_folded_upper[] = {
-   0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
-  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
-  32, '!', '"', '#', '$', '%', '&',  39, '(', ')', '*', '+', ',', '-', '.', '/',
- '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
- '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
- 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[',  92, ']', '^', '_',
- '`', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
- 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '{', '|', '}', '~', 127,
- 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
- 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
- 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
- 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
- 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
- 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
- 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
- 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
-};
-
-const char isalpha_array[] = {
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,
-0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,   0,   0,   0,   0,   0,
-   0,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,
-0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
-};
-
-extern "C" int __stdcall
-cygwin_wcscasecmp (const wchar_t *ws, const wchar_t *wt)
-{
-  UNICODE_STRING us, ut;
-
-  RtlInitUnicodeString (&us, ws);
-  RtlInitUnicodeString (&ut, wt);
-  return RtlCompareUnicodeString (&us, &ut, TRUE);
-}
-
-extern "C" int __stdcall
-cygwin_wcsncasecmp (const wchar_t  *ws, const wchar_t *wt, size_t n)
-{
-  UNICODE_STRING us, ut;
-  size_t ls = 0, lt = 0;
-
-  while (ws[ls] && ls < n)
-    ++ls;
-  RtlInitCountedUnicodeString (&us, ws, ls * sizeof (WCHAR));
-  while (wt[lt] && lt < n)
-    ++lt;
-  RtlInitCountedUnicodeString (&ut, wt, lt * sizeof (WCHAR));
-  return RtlCompareUnicodeString (&us, &ut, TRUE);
-}
-
-extern "C" int __stdcall
-cygwin_strcasecmp (const char *cs, const char *ct)
-{
-  UNICODE_STRING us, ut;
-  ULONG len;
-
-  len = (strlen (cs) + 1) * sizeof (WCHAR);
-  RtlInitEmptyUnicodeString (&us, (PWCHAR) alloca (len), len);
-  us.Length = sys_mbstowcs (us.Buffer, us.MaximumLength, cs) * sizeof (WCHAR);
-  len = (strlen (ct) + 1) * sizeof (WCHAR);
-  RtlInitEmptyUnicodeString (&ut, (PWCHAR) alloca (len), len);
-  ut.Length = sys_mbstowcs (ut.Buffer, ut.MaximumLength, ct) * sizeof (WCHAR);
-  return RtlCompareUnicodeString (&us, &ut, TRUE);
-}
-
-extern "C" int __stdcall
-cygwin_strncasecmp (const char *cs, const char *ct, size_t n)
-{
-  UNICODE_STRING us, ut;
-  ULONG len;
-  size_t ls = 0, lt = 0;
-
-  while (cs[ls] && ls < n)
-    ++ls;
-  len = (ls + 1) * sizeof (WCHAR);
-  RtlInitEmptyUnicodeString (&us, (PWCHAR) alloca (len), len);
-  us.Length = sys_mbstowcs (us.Buffer, ls + 1, cs, ls) * sizeof (WCHAR);
-  while (ct[lt] && lt < n)
-    ++lt;
-  len = (lt + 1) * sizeof (WCHAR);
-  RtlInitEmptyUnicodeString (&ut, (PWCHAR) alloca (len), len);
-  ut.Length = sys_mbstowcs (ut.Buffer, lt + 1, ct, lt)  * sizeof (WCHAR);
-  return RtlCompareUnicodeString (&us, &ut, TRUE);
-}
-
-extern "C" char *
-strlwr (char *string)
-{
-  UNICODE_STRING us;
-  size_t len = (strlen (string) + 1) * sizeof (WCHAR);
-
-  us.MaximumLength = len; us.Buffer = (PWCHAR) alloca (len);
-  us.Length = sys_mbstowcs (us.Buffer, len, string) * sizeof (WCHAR)
-	      - sizeof (WCHAR);
-  RtlDowncaseUnicodeString (&us, &us, FALSE);
-  sys_wcstombs (string, len / sizeof (WCHAR), us.Buffer);
-  return string;
-}
-
-extern "C" char *
-strupr (char *string)
-{
-  UNICODE_STRING us;
-  size_t len = (strlen (string) + 1) * sizeof (WCHAR);
-
-  us.MaximumLength = len; us.Buffer = (PWCHAR) alloca (len);
-  us.Length = sys_mbstowcs (us.Buffer, len, string) * sizeof (WCHAR)
-	      - sizeof (WCHAR);
-  RtlUpcaseUnicodeString (&us, &us, FALSE);
-  sys_wcstombs (string, len / sizeof (WCHAR), us.Buffer);
-  return string;
-}
 
 int __reg2
 check_invalid_virtual_addr (const void *s, unsigned sz)
@@ -204,7 +49,7 @@ check_iovec (const struct iovec *iov, int iovcnt, bool forwrite)
 
       size_t tot = 0;
 
-      while (iovcnt != 0)
+      while (iovcnt > 0)
 	{
 	  if (iov->iov_len > SSIZE_MAX || (tot += iov->iov_len) > SSIZE_MAX)
 	    {
@@ -224,32 +69,14 @@ check_iovec (const struct iovec *iov, int iovcnt, bool forwrite)
 	  iovcnt--;
 	}
 
-      assert (tot <= SSIZE_MAX);
+      if (tot <= SSIZE_MAX)
+	return (ssize_t) tot;
 
-      return (ssize_t) tot;
+      set_errno (EINVAL);
     }
   __except (EFAULT)
   __endtry
   return -1;
-}
-
-/* There's a bug in ntsecapi.h (Mingw as well as MSFT).  SystemFunction036
-   is, in fact, a WINAPI function, but it's not defined as such.  Therefore
-   we have to do it correctly here. */
-#define RtlGenRandom SystemFunction036
-extern "C" BOOLEAN WINAPI RtlGenRandom (PVOID, ULONG);
-
-/* Used by arc2random, fhandler_socket and fhandler_random. */
-extern "C" int
-getentropy (void *ptr, size_t len)
-{
-  if (!RtlGenRandom (ptr, len))
-    {
-      debug_printf ("%E = RtlGenRandom()");
-      set_errno (EIO);
-      return -1;
-    }
-  return 0;
 }
 
 /* Try hard to schedule another thread.  
@@ -477,54 +304,6 @@ NT_readline::gets ()
       buf[len] = buf[len + 1] = '\0';
       len = 0;
     }
-}
-
-/* backslashify: Convert all forward slashes in src path to back slashes
-   in dst path.  Add a trailing slash to dst when trailing_slash_p arg
-   is set to 1. */
-
-void
-backslashify (const char *src, char *dst, bool trailing_slash_p)
-{
-  const char *start = src;
-
-  while (*src)
-    {
-      if (*src == '/')
-	*dst++ = '\\';
-      else
-	*dst++ = *src;
-      ++src;
-    }
-  if (trailing_slash_p
-      && src > start
-      && !isdirsep (src[-1]))
-    *dst++ = '\\';
-  *dst++ = 0;
-}
-
-/* slashify: Convert all back slashes in src path to forward slashes
-   in dst path.  Add a trailing slash to dst when trailing_slash_p arg
-   is set to 1. */
-
-void
-slashify (const char *src, char *dst, bool trailing_slash_p)
-{
-  const char *start = src;
-
-  while (*src)
-    {
-      if (*src == '\\')
-	*dst++ = '/';
-      else
-	*dst++ = *src;
-      ++src;
-    }
-  if (trailing_slash_p
-      && src > start
-      && !isdirsep (src[-1]))
-    *dst++ = '/';
-  *dst++ = 0;
 }
 
 /* Return an address from the import jmp table of main program.  */
@@ -1129,10 +908,17 @@ SetThreadName(DWORD dwThreadID, const char* threadName)
       0x1000,                 /* type, must be 0x1000 */
       (ULONG_PTR) threadName, /* pointer to threadname */
       dwThreadID,             /* thread ID (+ flags on x86_64) */
-#ifdef __X86__
+#ifdef _X86_
       0,                      /* flags, must be zero */
 #endif
     };
+
+#ifdef _X86_
+  /* On x86, for __try/__except to work, we must ensure our exception handler is
+     installed, which may not be the case if this is being called during early
+     initialization. */
+  exception protect;
+#endif
 
   __try
     {

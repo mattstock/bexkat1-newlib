@@ -21,6 +21,7 @@
 #undef u_long
 #define u_long __ms_u_long
 #endif
+#include <ntsecapi.h>
 #include <ws2tcpip.h>
 #include <mswsock.h>
 #include <iphlpapi.h>
@@ -485,7 +486,7 @@ fhandler_socket::af_local_copy (fhandler_socket *sock)
 void
 fhandler_socket::af_local_set_secret (char *buf)
 {
-  if (getentropy (connect_secret, sizeof (connect_secret)))
+  if (!RtlGenRandom (connect_secret, sizeof (connect_secret)))
     bzero ((char*) connect_secret, sizeof (connect_secret));
   __small_sprintf (buf, "%08x-%08x-%08x-%08x",
 		   connect_secret [0], connect_secret [1],

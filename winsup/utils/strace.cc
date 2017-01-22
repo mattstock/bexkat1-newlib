@@ -88,6 +88,7 @@ warn (int geterrno, const char *fmt, ...)
       fputs (buf, stderr);
       fputs ("\n", stderr);
     }
+  va_end (args);
 }
 
 static void __attribute__ ((noreturn))
@@ -351,13 +352,16 @@ create_child (char **argv)
   make_command_line (one_line, argv);
 
   SetConsoleCtrlHandler (NULL, 0);
+
   const char *cygwin_env = getenv ("CYGWIN");
   const char *space;
-  if (cygwin_env)
+
+  if (cygwin_env && strlen (cygwin_env) <= 256) /* sanity check */
     space = " ";
   else
     space = cygwin_env = "";
-  char *newenv = (char *) malloc (sizeof ("CYGWIN=noglob") + strlen (space) + strlen (cygwin_env));
+  char *newenv = (char *) malloc (sizeof ("CYGWIN=noglob")
+				  + strlen (space) + strlen (cygwin_env));
   sprintf (newenv, "CYGWIN=noglob%s%s", space, cygwin_env);
   _putenv (newenv);
   ret = CreateProcess (0, one_line.buf,	/* command line */
@@ -472,6 +476,12 @@ handle_output_debug_string (DWORD id, LPVOID p, unsigned mask, FILE *ofile)
 	len = 17;
     }
 
+  /* Note that the following code deliberately points buf 20 bytes into the
+     allocated area.  The subsequent code then overwrites the usecs value
+     given in the application's debug string, which potentially prepends
+     characters to the string.  If that sounds confusing and dangerous, well...
+
+     TODO: This needs a cleanup. */
   char *buf;
   buf = (char *) alloca (len + 85) + 20;
 

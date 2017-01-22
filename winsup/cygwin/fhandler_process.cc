@@ -49,6 +49,7 @@ static off_t format_process_ctty (void *, char *&);
 static off_t format_process_fd (void *, char *&);
 static off_t format_process_mounts (void *, char *&);
 static off_t format_process_mountinfo (void *, char *&);
+static off_t format_process_environ (void *, char *&);
 
 static const virt_tab_t process_tab[] =
 {
@@ -57,6 +58,7 @@ static const virt_tab_t process_tab[] =
   { _VN ("cmdline"),    FH_PROCESS,   virt_file,      format_process_cmdline },
   { _VN ("ctty"),       FH_PROCESS,   virt_file,      format_process_ctty },
   { _VN ("cwd"),        FH_PROCESS,   virt_symlink,   format_process_cwd },
+  { _VN ("environ"),    FH_PROCESS,   virt_file,      format_process_environ },
   { _VN ("exe"),        FH_PROCESS,   virt_symlink,   format_process_exename },
   { _VN ("exename"),    FH_PROCESS,   virt_file,      format_process_exename },
   { _VN ("fd"),         FH_PROCESSFD, virt_directory, format_process_fd },
@@ -568,6 +570,26 @@ format_process_winexename (void *data, char *&destbuf)
   /* With trailing \0 for backward compat reasons. */
   sys_wcstombs (destbuf, len + 1, p->progname);
   return len;
+}
+
+static off_t
+format_process_environ (void *data, char *&destbuf)
+{
+  _pinfo *p = (_pinfo *) data;
+  size_t fs;
+
+  if (destbuf)
+    {
+      cfree (destbuf);
+      destbuf = NULL;
+    }
+  destbuf = p->environ (fs);
+  if (!destbuf || !*destbuf)
+    {
+      destbuf = cstrdup ("<defunct>");
+      fs = strlen (destbuf) + 1;
+    }
+  return fs;
 }
 
 struct heap_info
@@ -1208,7 +1230,7 @@ format_process_status (void *data, char *&destbuf)
   if (!get_mem_values (p->dwProcessId, &vmsize, &vmrss, &vmtext, &vmdata,
 		       &vmlib, &vmshare))
     return 0;
-  unsigned page_size = wincap.page_size ();
+  unsigned page_size = wincap.allocation_granularity ();
   vmsize *= page_size; vmrss *= page_size; vmdata *= page_size;
   vmtext *= page_size; vmlib *= page_size;
   /* The real uid value for *this* process is stored at cygheap->user.real_uid
@@ -1251,12 +1273,16 @@ format_process_statm (void *data, char *&destbuf)
   _pinfo *p = (_pinfo *) data;
   unsigned long vmsize = 0UL, vmrss = 0UL, vmtext = 0UL, vmdata = 0UL,
 		vmlib = 0UL, vmshare = 0UL;
+  size_t page_scale;
   if (!get_mem_values (p->dwProcessId, &vmsize, &vmrss, &vmtext, &vmdata,
 		       &vmlib, &vmshare))
     return 0;
+
+  page_scale = wincap.allocation_granularity() / wincap.page_size();
   destbuf = (char *) crealloc_abort (destbuf, 96);
   return __small_sprintf (destbuf, "%ld %ld %ld %ld %ld %ld 0\n",
-			  vmsize, vmrss, vmshare, vmtext, vmlib, vmdata);
+              vmsize / page_scale, vmrss / page_scale, vmshare / page_scale,
+              vmtext / page_scale, vmlib / page_scale, vmdata / page_scale);
 }
 
 extern "C" {

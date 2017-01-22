@@ -88,9 +88,6 @@ EvalRet (int ret, const char *user)
 	eprint (0, "You may not change the password for %s.", user);
       break;
 
-      eprint (0, "Bad password: Invalid.");
-      break;
-
     case NERR_PasswordTooShort:
       eprint (0, "Bad password: Too short.");
       break;
@@ -595,7 +592,8 @@ main (int argc, char **argv)
       return SetModals (xarg, narg, iarg, Larg, server);
     }
 
-  strcpy (user, optind >= argc ? getlogin () : argv[optind]);
+  user[0] = '\0';
+  strncat (user, optind >= argc ? getlogin () : argv[optind], UNLEN);
 
   /* Changing password for calling user?  Use logonserver for user as well. */
   if (!server && optind >= argc)

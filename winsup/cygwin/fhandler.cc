@@ -1891,6 +1891,8 @@ fhandler_base::fpathconf (int v)
 	return pc.has_acls () || pc.fs_is_nfs ();
       set_errno (EINVAL);
       break;
+    case _PC_CASE_INSENSITIVE:
+      return !!pc.objcaseinsensitive ();
     default:
       set_errno (EINVAL);
       break;
@@ -2153,7 +2155,7 @@ fhandler_base_overlapped::raw_write (const void *ptr, size_t len)
 	    case overlapped_success:
 	      ptr = ((char *) ptr) + chunk;
 	      nbytes += nbytes_now;
-	      /* fall through intentionally */
+	      break;
 	    case overlapped_error:
 	      len = 0;		/* terminate loop */
 	    case overlapped_unknown:

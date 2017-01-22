@@ -1406,7 +1406,12 @@ normalize_win32_path (const char *src, char *dst, char *&tail)
       /* Ignore "./".  */
       else if (src[0] == '.' && isdirsep (src[1])
 	       && (src == src_start || isdirsep (src[-1])))
-	src += 2;
+	{
+	  src += 2;
+	  /* Skip /'s to the next path component. */
+	  while (isdirsep (*src))
+	    src++;
+	}
 
       /* Backup if "..".  */
       else if (src[0] == '.' && src[1] == '.'
@@ -1704,10 +1709,9 @@ symlink_native (const char *oldpath, path_conv &win32_newpath)
      to Win32 paths. */
   if (final_oldpath->Buffer[0] == L'\\')
     {
-      /* Workaround Windows 8.1 bug.  On Windows 8.1, the ShellExecuteW
-	 function does not handle the long path prefix correctly for symlink
-	 targets.  Thus, we create simple short paths < MAX_PATH without
-	 long path prefix. */
+      /* Starting with Windows 8.1, the ShellExecuteW function does not
+	 handle the long path prefix correctly for symlink targets.  Thus,
+	 we create simple short paths < MAX_PATH without long path prefix. */
       if (RtlEqualUnicodePathPrefix (final_oldpath, &ro_u_uncp, TRUE)
 	  && final_oldpath->Length < (MAX_PATH + 6) * sizeof (WCHAR))
 	{
@@ -2806,6 +2810,13 @@ restart:
 	      || status == STATUS_NO_MEDIA_IN_DEVICE)
 	    {
 	      set_error (ENOENT);
+	      if (ext_tacked_on && !had_ext)
+		{
+		  *ext_here = '\0';
+		  ext_tacked_on = false;
+		  ext_here = NULL;
+		  extn = 0;
+		}
 	      goto file_not_symlink;
 	    }
 	  if (status != STATUS_OBJECT_NAME_NOT_FOUND
@@ -3306,7 +3317,7 @@ cygwin_conv_path (cygwin_conv_path_t what, const void *from, void *to,
 	    p.check ((const char *) from,
 		     PC_POSIX | PC_SYM_FOLLOW | PC_SYM_NOFOLLOW_REP
 		     | PC_NO_ACCESS_CHECK | PC_NOWARN
-		     | ((how & CCP_RELATIVE) ? PC_NOFULL : 0));
+		     | ((how & CCP_RELATIVE) ? PC_NOFULL : 0), stat_suffixes);
 	    if (p.error)
 	      {
 	        set_errno (p.error);
@@ -3351,7 +3362,7 @@ cygwin_conv_path (cygwin_conv_path_t what, const void *from, void *to,
 	  p.check ((const char *) from,
 		   PC_POSIX | PC_SYM_FOLLOW | PC_SYM_NOFOLLOW_REP
 		   | PC_NO_ACCESS_CHECK | PC_NOWARN
-		   | ((how & CCP_RELATIVE) ? PC_NOFULL : 0));
+		   | ((how & CCP_RELATIVE) ? PC_NOFULL : 0), stat_suffixes);
 	  if (p.error)
 	    {
 	      set_errno (p.error);
@@ -3967,12 +3978,15 @@ fcwd_access_t::SetDirHandleFromBufferPointer (PWCHAR buf_p, HANDLE dir)
     default:
       f_cwd = (fcwd_access_t *)
 	((PBYTE) buf_p - __builtin_offsetof (FAST_CWD_OLD, Buffer));
+      break;
     case FCWD_W7:
       f_cwd = (fcwd_access_t *)
 	((PBYTE) buf_p - __builtin_offsetof (FAST_CWD_7, Buffer));
+      break;
     case FCWD_W8:
       f_cwd = (fcwd_access_t *)
 	((PBYTE) buf_p - __builtin_offsetof (FAST_CWD_8, Buffer));
+      break;
     }
   f_cwd->DirectoryHandle () = dir;
 }
@@ -4020,7 +4034,7 @@ find_fast_cwd_pointer ()
   if (!get_dir || !ent_crit)
     return NULL;
   /* Search first relative call instruction in RtlGetCurrentDirectory_U. */
-  const uint8_t *rcall = (const uint8_t *) memchr (get_dir, 0xe8, 40);
+  const uint8_t *rcall = (const uint8_t *) memchr (get_dir, 0xe8, 80);
   if (!rcall)
     return NULL;
   /* Fetch offset from instruction and compute address of called function.
@@ -4119,7 +4133,7 @@ find_fast_cwd_pointer ()
   if (!get_dir || !ent_crit)
     return NULL;
   /* Search first relative call instruction in RtlGetCurrentDirectory_U. */
-  const uint8_t *rcall = (const uint8_t *) memchr (get_dir, 0xe8, 32);
+  const uint8_t *rcall = (const uint8_t *) memchr (get_dir, 0xe8, 64);
   if (!rcall)
     return NULL;
   /* Fetch offset from instruction and compute address of called function.

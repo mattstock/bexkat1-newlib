@@ -1,0 +1,24 @@
+What's new:
+-----------
+
+- Support for /proc/<PID>/environ.
+
+- New API: getentropy, getrandom, NL_LOCALE_NAME.
+
+
+What changed:
+-------------
+
+
+Bug Fixes
+---------
+
+- Fix rename(2) fail with EACCES if newfile is in use.
+  Addresses: https://cygwin.com/ml/cygwin/2017-01/msg00108.html
+
+- Always try to write all incoming bytes to blocking pipes, as required
+  by POSIX.
+  Addresses: https://cygwin.com/ml/cygwin/2017-01/msg00087.html
+
+- Fix handling of Alt-Numpad sequences in console handler.
+  Addresses: https://cygwin.com/ml/cygwin/2017-01/msg00135.html

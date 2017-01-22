@@ -35,6 +35,11 @@ typedef	__accmode_t	accmode_t;	/* access permissions */
 #define	_ACCMODE_T_DECLARED
 #endif
 
+#ifndef _CAP_IOCTL_T_DECLARED
+#define	_CAP_IOCTL_T_DECLARED
+typedef	unsigned long	cap_ioctl_t;
+#endif
+
 #ifndef _CAP_RIGHTS_T_DECLARED
 #define	_CAP_RIGHTS_T_DECLARED
 struct cap_rights;
@@ -69,5 +74,12 @@ typedef	__uintptr_t	vm_offset_t;
 typedef	__uintptr_t	vm_paddr_t;
 typedef	__uintptr_t	vm_pindex_t;
 typedef	__uintptr_t	vm_size_t;
+
+typedef	__uintmax_t	rman_res_t;
+
+#ifdef _KERNEL
+/* Header file provided outside of Newlib */
+#include <machine/_kernel_types.h>
+#endif
 
 #endif /* __BSD_VISIBLE */

@@ -502,7 +502,7 @@ _pinfo::set_ctty (fhandler_termios *fh, int flags)
       if (!tc.getpgid () && pgid == pid)
 	tc.setpgid (pgid);
     }
-  debug_printf ("cygheap->ctty now %p, archetype %p", cygheap->ctty, fh->archetype);
+  debug_printf ("cygheap->ctty now %p, archetype %p", cygheap->ctty, fh ? fh->archetype : NULL);
   return ctty > 0;
 }
 
@@ -654,6 +654,25 @@ commune_process (void *arg)
 	  sigproc_printf ("WritePipeOverlapped fd failed, %E");
 	break;
       }
+    case PICOM_ENVIRON:
+      {
+	sigproc_printf ("processing PICOM_ENVIRON");
+	unsigned n = 0;
+	char **env = cur_environ ();
+	for (char **e = env; *e; e++)
+	  n += strlen (*e) + 1;
+	if (!WritePipeOverlapped (tothem, &n, sizeof n, &nr, 1000L))
+	  sigproc_printf ("WritePipeOverlapped sizeof argv failed, %E");
+	else
+	  for (char **e = env; *e; e++)
+	    if (!WritePipeOverlapped (tothem, *e, strlen (*e) + 1, &nr, 1000L))
+	      {
+	        sigproc_printf ("WritePipeOverlapped arg %d failed, %E",
+				e - env);
+	        break;
+	      }
+	break;
+      }
     }
   if (process_sync)
     {
@@ -730,6 +749,7 @@ _pinfo::commune_request (__uint32_t code, ...)
     {
     case PICOM_CMDLINE:
     case PICOM_CWD:
+    case PICOM_ENVIRON:
     case PICOM_ROOT:
     case PICOM_FDS:
     case PICOM_FD:
@@ -989,6 +1009,66 @@ _pinfo::cmdline (size_t& n)
 	  strcpy (p, *a);
 	  p = strchr (p, '\0') + 1;
 	}
+    }
+  return s;
+}
+
+
+char *
+_pinfo::environ (size_t& n)
+{
+  char **env = NULL;
+  if (!this || !pid)
+    return NULL;
+  if (ISSTATE (this, PID_NOTCYGWIN))
+    {
+      RTL_USER_PROCESS_PARAMETERS rupp;
+      HANDLE proc = open_commune_proc_parms (dwProcessId, &rupp);
+
+      if (!proc)
+        return NULL;
+
+      MEMORY_BASIC_INFORMATION mbi;
+      SIZE_T envsize;
+      PWCHAR envblock;
+      if (!VirtualQueryEx (proc, rupp.Environment, &mbi, sizeof(mbi)))
+        {
+          NtClose (proc);
+          return NULL;
+        }
+
+      SIZE_T read;
+      envsize = (ptrdiff_t) mbi.RegionSize
+                - ((ptrdiff_t) rupp.Environment - (ptrdiff_t) mbi.BaseAddress);
+      envblock = (PWCHAR) cmalloc_abort (HEAP_COMMUNE, envsize);
+
+      if (ReadProcessMemory (proc, rupp.Environment, envblock, envsize, &read))
+        env = win32env_to_cygenv (envblock, false);
+
+      NtClose (proc);
+    }
+  else if (pid != myself->pid)
+    {
+      commune_result cr = commune_request (PICOM_ENVIRON);
+      n = cr.n;
+      return cr.s;
+    }
+  else
+    env = cur_environ ();
+
+  if (env == NULL)
+    return NULL;
+
+  n = 0;
+  for (char **e = env; *e; e++)
+    n += strlen (*e) + 1;
+
+  char *p, *s;
+  p = s = (char *) cmalloc_abort (HEAP_COMMUNE, n);
+  for (char **e = env; *e; e++)
+    {
+      strcpy (p, *e);
+      p = strchr (p, '\0') + 1;
     }
   return s;
 }

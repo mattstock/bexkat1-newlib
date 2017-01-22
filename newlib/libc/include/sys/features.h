@@ -333,7 +333,7 @@ extern "C" {
 #define _POSIX_PRIORITY_SCHEDULING	1
 #define _POSIX_REALTIME_SIGNALS		1
 #define _POSIX_SEMAPHORES		1
-/* #define _POSIX_SHARED_MEMORY_OBJECTS	1 */
+#define _POSIX_SHARED_MEMORY_OBJECTS	1
 #define _POSIX_SYNCHRONIZED_IO		1
 #define _POSIX_TIMERS			1
 #define _POSIX_BARRIERS                 200112L
@@ -365,6 +365,9 @@ extern "C" {
 
 /* UNIX98 added some new pthread mutex attributes */
 #define _UNIX98_THREAD_MUTEX_ATTRIBUTES         1
+
+/* POSIX 1003.26-2003 defined device control method */
+#define _POSIX_26_VERSION			200312L
 
 #endif
 
