@@ -1,3 +1,3 @@
 .section text
 .global _stack
-.set _stack, 0x00800000
+.set _stack, 0x04000000
