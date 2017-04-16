@@ -787,6 +787,7 @@ CPPFLAGS
 CPP'
 ac_subdirs_all='aarch64
 arm
+bexkat1
 i386
 nds32
 spu'
@@ -11788,6 +11789,8 @@ if test -n "${libm_machine_dir}"; then
 subdirs="$subdirs aarch64"
  ;;
 	arm) subdirs="$subdirs arm"
+ ;;
+	bexkat1) subdirs="$subdirs bexkat1"
  ;;
 	i386) subdirs="$subdirs i386"
  ;;
