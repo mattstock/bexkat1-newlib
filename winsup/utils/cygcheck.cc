@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <ctype.h>
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 #include <wininet.h>
@@ -2009,8 +2010,8 @@ check_keys ()
   return 0;
 }
 
-/* RFC1738 says that these do not need to be escaped.  */
-static const char safe_chars[] = "$-_.+!*'(),";
+/* These do not need to be escaped in application/x-www-form-urlencoded */
+static const char safe_chars[] = "$-_.!*'(),";
 
 /* the URL to query.  */
 static const char base_url[] =
@@ -2250,6 +2251,9 @@ main (int argc, char **argv)
   int i;
   bool ok = true;
   load_cygwin (argc, argv);
+
+  _setmode (1, _O_BINARY);
+  _setmode (2, _O_BINARY);
 
   /* Need POSIX sorting while parsing args, but don't forget the
      user's original environment.  */

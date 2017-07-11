@@ -1621,6 +1621,10 @@ cnt_bs (PWCHAR s, PWCHAR e)
   return num;
 }
 
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 2
+#endif
+
 static int
 symlink_native (const char *oldpath, path_conv &win32_newpath)
 {
@@ -1628,6 +1632,7 @@ symlink_native (const char *oldpath, path_conv &win32_newpath)
   path_conv win32_oldpath;
   PUNICODE_STRING final_oldpath, final_newpath;
   UNICODE_STRING final_oldpath_buf;
+  DWORD flags;
 
   if (isabspath (oldpath))
     {
@@ -1724,9 +1729,11 @@ symlink_native (const char *oldpath, path_conv &win32_newpath)
 	final_oldpath->Buffer[1] = L'\\';
     }
   /* Try to create native symlink. */
+  flags = win32_oldpath.isdir () ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0;
+  if (wincap.has_unprivileged_createsymlink ())
+    flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
   if (!CreateSymbolicLinkW (final_newpath->Buffer, final_oldpath->Buffer,
-			    win32_oldpath.isdir ()
-			    ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0))
+			    flags))
     {
       /* Repair native newpath, we still need it. */
       final_newpath->Buffer[1] = L'?';
@@ -2254,6 +2261,31 @@ symlink_info::check_sysfile (HANDLE h)
   return res;
 }
 
+bool
+check_reparse_point_target (PUNICODE_STRING subst)
+{
+  /* Native mount points, or native non-relative symbolic links,
+     can be treated as posix symlinks only if the SubstituteName
+     can be converted from a native NT object namespace name to
+     a win32 name. We only know how to convert names with two
+     prefixes :
+       "\??\UNC\..."
+       "\??\X:..."
+     Other reparse points will be treated as files or
+     directories, not as posix symlinks.
+     */
+  if (RtlEqualUnicodePathPrefix (subst, &ro_u_natp, FALSE))
+    {
+      if (subst->Length >= 6*sizeof(WCHAR) && subst->Buffer[5] == L':' &&
+          (subst->Length == 6*sizeof(WCHAR) || subst->Buffer[6] == L'\\'))
+        return true;
+      else if (subst->Length >= 8*sizeof(WCHAR) &&
+          wcsncmp (subst->Buffer + 4, L"UNC\\", 4) == 0)
+        return true;
+    }
+  return false;
+}
+
 int
 symlink_info::check_reparse_point (HANDLE h, bool remote)
 {
@@ -2292,14 +2324,24 @@ symlink_info::check_reparse_point (HANDLE h, bool remote)
       return 0;
     }
   if (rp->ReparseTag == IO_REPARSE_TAG_SYMLINK)
-    /* Windows evaluates native symlink literally.  If a remote symlink points
-       to, say, C:\foo, it will be handled as if the target is the local file
-       C:\foo.  That comes in handy since that's how symlinks are treated under
-       POSIX as well. */
-    RtlInitCountedUnicodeString (&subst,
-		  (WCHAR *)((char *)rp->SymbolicLinkReparseBuffer.PathBuffer
-			+ rp->SymbolicLinkReparseBuffer.SubstituteNameOffset),
-		  rp->SymbolicLinkReparseBuffer.SubstituteNameLength);
+    {
+      /* Windows evaluates native symlink literally.  If a remote symlink points
+         to, say, C:\foo, it will be handled as if the target is the local file
+         C:\foo.  That comes in handy since that's how symlinks are treated under
+         POSIX as well. */
+      RtlInitCountedUnicodeString (&subst,
+		    (WCHAR *)((char *)rp->SymbolicLinkReparseBuffer.PathBuffer
+			  + rp->SymbolicLinkReparseBuffer.SubstituteNameOffset),
+		    rp->SymbolicLinkReparseBuffer.SubstituteNameLength);
+      if (!(rp->SymbolicLinkReparseBuffer.Flags & SYMLINK_FLAG_RELATIVE) &&
+          !check_reparse_point_target (&subst))
+	{
+	  /* Unsupport native symlink target prefix. Not treated as symlink.
+	     The return value of -1 indicates name needs to be opened without
+	     FILE_OPEN_REPARSE_POINT flag. */
+	  return -1;
+	}
+    }
   else if (!remote && rp->ReparseTag == IO_REPARSE_TAG_MOUNT_POINT)
     {
       /* Don't handle junctions on remote filesystems as symlinks.  This type
@@ -2311,11 +2353,11 @@ symlink_info::check_reparse_point (HANDLE h, bool remote)
 		  (WCHAR *)((char *)rp->MountPointReparseBuffer.PathBuffer
 			  + rp->MountPointReparseBuffer.SubstituteNameOffset),
 		  rp->MountPointReparseBuffer.SubstituteNameLength);
-      if (RtlEqualUnicodePathPrefix (&subst, &ro_u_volume, TRUE))
+      if (!check_reparse_point_target (&subst))
 	{
-	  /* Volume mount point.  Not treated as symlink. The return
-	     value of -1 is a hint for the caller to treat this as a
-	     volume mount point. */
+	  /* Volume mount point, or unsupported native target prefix. Not
+	     treated as symlink. The return value of -1 indicates name needs
+	     to be opened without FILE_OPEN_REPARSE_POINT flag. */
 	  return -1;
 	}
     }
@@ -4445,11 +4487,23 @@ cwdstuff::set (path_conv *nat_cwd, const char *posix_cwd)
 	{
 	  /* On init, just reopen Win32 CWD with desired access flags.
 	     We can access the PEB without lock, because no other thread
-	     can change the CWD. */
-	  RtlInitUnicodeString (&upath, L"");
-	  InitializeObjectAttributes (&attr, &upath,
-			OBJ_CASE_INSENSITIVE | OBJ_INHERIT,
-			peb.ProcessParameters->CurrentDirectoryHandle, NULL);
+	     can change the CWD.  However, there's a chance that the handle
+	     is NULL, even though CurrentDirectoryName isn't so we have to
+	     be careful. */
+	  if (!peb.ProcessParameters->CurrentDirectoryHandle)
+	    {
+	      InitializeObjectAttributes (&attr,
+			    &peb.ProcessParameters->CurrentDirectoryName,
+			    OBJ_CASE_INSENSITIVE | OBJ_INHERIT, NULL, NULL);
+	    }
+	  else
+	    {
+	      RtlInitUnicodeString (&upath, L"");
+	      InitializeObjectAttributes (&attr,
+			    &upath, OBJ_CASE_INSENSITIVE | OBJ_INHERIT,
+			    peb.ProcessParameters->CurrentDirectoryHandle,
+			    NULL);
+	    }
 	}
       else
 	InitializeObjectAttributes (&attr, &upath,
@@ -4474,9 +4528,31 @@ cwdstuff::set (path_conv *nat_cwd, const char *posix_cwd)
 	}
       if (!NT_SUCCESS (status))
 	{
-	  cwd_lock.release ();
-	  __seterrno_from_nt_status (status);
-	  return -1;
+	  /* Called from chdir?  Just fail. */
+	  if (nat_cwd)
+	    {
+	      cwd_lock.release ();
+	      __seterrno_from_nt_status (status);
+	      return -1;
+	    }
+	  /* Otherwise we're in init and posix hasn't been set yet.  Try to
+	     duplicate the handle instead.  If that fails, too, set dir to NULL
+	     and carry on.  This will at least set posix to some valid path at
+	     process startup, and subsequent getcwd calls don't EFAULT. */
+	  debug_printf ("WARNING: Can't reopen CWD %y '%S', status %y",
+			peb.ProcessParameters->CurrentDirectoryHandle,
+			&peb.ProcessParameters->CurrentDirectoryName,
+			status);
+	  if (!peb.ProcessParameters->CurrentDirectoryHandle
+	      || !DuplicateHandle (GetCurrentProcess (),
+			peb.ProcessParameters->CurrentDirectoryHandle,
+			GetCurrentProcess (), &h, 0, TRUE, 0))
+	    {
+	      cwd_lock.release ();
+	      if (peb.ProcessParameters->CurrentDirectoryHandle)
+		debug_printf ("...and DuplicateHandle failed with %E.");
+	      dir = NULL;
+	    }
 	}
     }
   /* Set new handle.  Note that we simply overwrite the old handle here

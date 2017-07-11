@@ -373,7 +373,7 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
      names. */
   RtlAppendUnicodeToString (&recycler,
 			    (pc.fs_flags () & FILE_UNICODE_ON_DISK
-			     && !pc.fs_is_samba ())
+			     && !pc.fs_is_samba () && !pc.fs_is_netapp ())
 			    ? L".\xdc63\xdc79\xdc67" : L".cyg");
   pfii = (PFILE_INTERNAL_INFORMATION) infobuf;
   /* Note: Modern Samba versions apparently don't like buffer sizes of more
@@ -3784,28 +3784,6 @@ nice (int incr)
   return setpriority (PRIO_PROCESS, myself->pid, myself->nice + incr);
 }
 
-/*
- * Find the first bit set in I.
- */
-
-extern "C" int
-ffs (int i)
-{
-  return __builtin_ffs (i);
-}
-
-extern "C" int
-ffsl (long i)
-{
-  return __builtin_ffsl (i);
-}
-
-extern "C" int
-ffsll (long long i)
-{
-  return __builtin_ffsll (i);
-}
-
 static void
 locked_append (int fd, const void * buf, size_t size)
 {
@@ -4771,7 +4749,7 @@ scandirat (int dirfd, const char *pathname, struct dirent ***namelist,
       char *path = tp.c_get ();
       if (gen_full_path_at (path, dirfd, pathname))
 	__leave;
-      return scandir (pathname, namelist, select, compar);
+      return scandir (path, namelist, select, compar);
     }
   __except (EFAULT) {}
   __endtry

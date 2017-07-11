@@ -351,7 +351,7 @@ static const unsigned char conv_start_chars[256] =
 static inline char
 match_first_char (const char *s, unsigned char m)
 {
-  return conv_start_chars[(unsigned) *s] & m;
+  return conv_start_chars[*(unsigned char *)s] & m;
 }
 
 struct win_env&
@@ -454,8 +454,7 @@ posify_maybe (char **here, const char *value, char *outenv)
 
   memcpy (outenv, src, len);
   char *newvalue = outenv + len;
-  if (!conv->toposix (value, newvalue, NT_MAX_PATH - len)
-      || _impure_ptr->_errno != EIDRM)
+  if (!conv->toposix (value, newvalue, NT_MAX_PATH - len) || errno != EIDRM)
     conv->add_cache (newvalue, *value != '/' ? value : NULL);
   else
     {
@@ -796,7 +795,7 @@ environ_init (char **envp, int envc)
 	}
       debug_printf ("GetEnvironmentStrings returned %p", rawenv);
 
-	  lastenviron = envp = win32env_to_cygenv (rawenv, true);
+      lastenviron = envp = win32env_to_cygenv (rawenv, true);
 
       FreeEnvironmentStringsW (rawenv);
 

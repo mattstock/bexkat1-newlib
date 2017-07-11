@@ -102,6 +102,7 @@ __wrap__ZdlPv NOSIGFE               # void operator delete(void *p) throw()
 __wrap__ZdlPvRKSt9nothrow_t NOSIGFE # void operator delete(void *p, const std::nothrow_t &nt) throw()
 __xdrrec_getrec SIGFE
 __xdrrec_setnonblock SIGFE
+__xpg_sigpause SIGFE
 __xpg_strerror_r SIGFE
 _exit SIGFE
 _feinitialise NOSIGFE
@@ -364,6 +365,7 @@ difftime NOSIGFE
 dirfd SIGFE
 dirname NOSIGFE
 div NOSIGFE
+dladdr SIGFE
 dlclose SIGFE
 dlerror NOSIGFE
 dlfork NOSIGFE
@@ -504,6 +506,9 @@ flockfile SIGFE
 floor NOSIGFE
 floorf NOSIGFE
 floorl NOSIGFE
+fls NOSIGFE
+flsl NOSIGFE
+flsll NOSIGFE
 fma NOSIGFE
 fmaf NOSIGFE
 fmal NOSIGFE
@@ -623,6 +628,7 @@ gethostname = cygwin_gethostname SIGFE
 getifaddrs SIGFE
 getitimer SIGFE
 getline = __getline SIGFE
+getloadavg SIGFE
 getlogin NOSIGFE
 getlogin_r NOSIGFE
 getmntent SIGFE
@@ -1137,6 +1143,7 @@ readlink SIGFE
 readlinkat SIGFE
 readv SIGFE
 realloc SIGFE
+reallocarray SIGFE
 reallocf SIGFE
 realpath SIGFE
 recv = cygwin_recv SIGFE
@@ -1392,6 +1399,7 @@ strtoull NOSIGFE
 strtoull_l NOSIGFE
 strtoumax = strtoull NOSIGFE
 strupr NOSIGFE
+strverscmp NOSIGFE
 strxfrm NOSIGFE
 strxfrm_l NOSIGFE
 swab NOSIGFE
@@ -1437,6 +1445,8 @@ timer_gettime SIGFE
 timer_settime SIGFE
 times SIGFE
 timezone SIGFE
+timingsafe_bcmp NOSIGFE
+timingsafe_memcmp NOSIGFE
 tmpfile SIGFE
 tmpnam SIGFE
 toascii NOSIGFE
@@ -1486,6 +1496,7 @@ vasprintf SIGFE
 vdprintf SIGFE
 verr SIGFE
 verrx SIGFE
+versionsort NOSIGFE
 vfiprintf SIGFE
 vfork SIGFE
 vfprintf SIGFE

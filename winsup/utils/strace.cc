@@ -13,6 +13,7 @@ details. */
 #define cygwin_internal cygwin_internal_dontuse
 #include <stdio.h>
 #include <fcntl.h>
+#include <io.h>
 #include <getopt.h>
 #include <stdarg.h>
 #include <string.h>
@@ -1054,6 +1055,9 @@ main2 (int argc, char **argv)
 	  argc++;
     }
 
+  _setmode (1, _O_BINARY);
+  _setmode (2, _O_BINARY);
+
   if (!(pgm = strrchr (*argv, '\\')) && !(pgm = strrchr (*argv, '/')))
     pgm = *argv;
   else
@@ -1187,7 +1191,7 @@ main (int argc, char **argv)
      registry setting to 0x100000 (TOP_DOWN). */
   char buf[CYGTLS_PADSIZE];
 
-  memset (buf, 0, sizeof (buf));
+  RtlSecureZeroMemory (buf, sizeof (buf));
   exit (main2 (argc, argv));
 }
 

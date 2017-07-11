@@ -877,7 +877,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     signal
     signbit			(see chapter "Implementation Notes")
     signgam
-    sigpause
+    sigpause			(see chapter "Implementation Notes")
     sigpending
     sigprocmask
     sigqueue
@@ -925,7 +925,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     strdup
     strerror
     strerror_l
-    strerror_r
+    strerror_r			(see chapter "Implementation Notes")
     strfmon
     strfmon_l
     strftime
@@ -1149,6 +1149,9 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     finitel
     fiprintf
     flock			(see chapter "Implementation Notes")
+    fls
+    flsl
+    flsll
     forkpty
     fpurge
     fputc_unlocked
@@ -1173,6 +1176,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     getdtablesize
     getgrouplist
     getifaddrs
+    getloadavg
     getpagesize
     getpeereid
     getprogname
@@ -1197,6 +1201,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     qsort_r			(see chapter "Implementation Notes")
     rcmd
     rcmd_af
+    reallocarray
     reallocf
     res_close
     res_init
@@ -1232,6 +1237,8 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     strlcat
     strlcpy
     strsep
+    timingsafe_bcmp
+    timingsafe_memcmp
     updwtmp
     valloc
     verr
@@ -1275,6 +1282,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     clog10
     clog10f
     clog10l
+    dladdr			(see chapter "Implementation Notes")
     dremf
     dup3
     envz_add
@@ -1362,6 +1370,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     strtoll_l
     strtoul_l
     strtoull_l
+    strverscmp
     sysinfo
     tdestroy
     timegm
@@ -1372,6 +1381,7 @@ also IEEE Std 1003.1-2008 (POSIX.1-2008).</para>
     vasnprintf
     vasprintf
     vasprintf_r
+    versionsort
     wcsftime_l
     wcstod_l
     wcstof_l
@@ -1662,6 +1672,15 @@ depending on whether _BSD_SOURCE or _GNU_SOURCE is defined when compiling.</para
 
 <para><function>basename</function> is available in both POSIX and GNU flavors,
 depending on whether libgen.h is included or not.</para>
+
+<para><function>sigpause</function> is available in both BSD and SysV/XSI
+flavors, depending on whether _XOPEN_SOURCE is defined when compiling.</para>
+
+<para><function>strerror_r</function> is available in both POSIX and GNU
+flavors, depending on whether _GNU_SOURCE is defined when compiling.</para>
+
+<para><function>dladdr</function> always sets the Dl_info members dli_sname and
+dli_saddr to NULL, indicating no symbol matching addr could be found.</para>
 
 </sect1>
 

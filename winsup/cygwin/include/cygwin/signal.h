@@ -175,7 +175,10 @@ typedef struct sigevent
   pthread_attr_t *sigev_notify_attributes; /* notification attributes */
 } sigevent_t;
 
+#if __POSIX_VISIBLE >= 199309
+
 #pragma pack(push,4)
+
 struct _sigcommune
 {
   __uint32_t _si_code;
@@ -249,7 +252,10 @@ typedef struct
 #endif /*__INSIDE_CYGWIN__*/
   };
 } siginfo_t;
+
 #pragma pack(pop)
+
+#endif /* __POSIX_VISIBLE >= 199309 */
 
 enum
 {
@@ -314,12 +320,16 @@ enum
 
 typedef void (*_sig_func_ptr)(int);
 
+#if __POSIX_VISIBLE
+
 struct sigaction
 {
   __extension__ union
   {
     _sig_func_ptr sa_handler;  		/* SIG_DFL, SIG_IGN, or pointer to a function */
+#if __POSIX_VISIBLE >= 199309
     void  (*sa_sigaction) ( int, siginfo_t *, void * );
+#endif
   };
   sigset_t sa_mask;
   int sa_flags;
@@ -344,10 +354,16 @@ struct sigaction
    Do not use.  */
 #define _SA_INTERNAL_MASK 0xf000	/* bits in this range are internal */
 
+#endif /* __POSIX_VISIBLE */
+
+#if __BSD_VISIBLE || __XSI_VISIBLE >= 4 || __POSIX_VISIBLE >= 200809
+
 #undef	MINSIGSTKSZ
 #define	MINSIGSTKSZ	 8192
 #undef	SIGSTKSZ
 #define	SIGSTKSZ	32768
+
+#endif /* __BSD_VISIBLE || __XSI_VISIBLE >= 4 || __POSIX_VISIBLE >= 200809 */
 
 #define	SIGHUP	1	/* hangup */
 #define	SIGINT	2	/* interrupt */
@@ -397,20 +413,32 @@ struct sigaction
 
 #define SIG_HOLD ((_sig_func_ptr)2)	/* Signal in signal mask */
 
+#if __POSIX_VISIBLE >= 200809
 void psiginfo (const siginfo_t *, const char *);
+#endif
+#if __POSIX_VISIBLE
 int sigwait (const sigset_t *, int *);
+#endif
+#if __POSIX_VISIBLE >= 199309
 int sigwaitinfo (const sigset_t *, siginfo_t *);
+#endif
+#if __XSI_VISIBLE >= 4
 int sighold (int);
 int sigignore (int);
 int sigrelse (int);
 _sig_func_ptr sigset (int, _sig_func_ptr);
+#endif
 
+#if __POSIX_VISIBLE >= 199309
 int sigqueue(pid_t, int, const union sigval);
+#endif
+#if __BSD_VISIBLE || __XSI_VISIBLE >= 4 || __POSIX_VISIBLE >= 200809
 int siginterrupt (int, int);
+#endif
 #ifdef __INSIDE_CYGWIN__
 extern const char *sys_sigabbrev[];
 extern const char *sys_siglist[];
-#else
+#elif __BSD_VISIBLE
 extern const char __declspec(dllimport) *sys_sigabbrev[];
 extern const char __declspec(dllimport) *sys_siglist[];
 #endif
