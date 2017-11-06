@@ -433,6 +433,7 @@ exp2f NOSIGFE
 exp2l NOSIGFE
 expf NOSIGFE
 expl NOSIGFE
+explicit_bzero NOSIGFE
 expm1 NOSIGFE
 expm1f NOSIGFE
 expm1l NOSIGFE
@@ -1067,6 +1068,7 @@ pthread_mutex_getprioceiling SIGFE
 pthread_mutex_init SIGFE
 pthread_mutex_lock SIGFE
 pthread_mutex_setprioceiling SIGFE
+pthread_mutex_timedlock SIGFE
 pthread_mutex_trylock SIGFE
 pthread_mutex_unlock SIGFE
 pthread_mutexattr_destroy SIGFE
@@ -1083,6 +1085,8 @@ pthread_once SIGFE
 pthread_rwlock_destroy SIGFE
 pthread_rwlock_init SIGFE
 pthread_rwlock_rdlock SIGFE
+pthread_rwlock_timedrdlock SIGFE
+pthread_rwlock_timedwrlock SIGFE
 pthread_rwlock_tryrdlock SIGFE
 pthread_rwlock_trywrlock SIGFE
 pthread_rwlock_unlock SIGFE
@@ -1164,6 +1168,7 @@ remquof NOSIGFE
 remquol NOSIGFE
 rename SIGFE
 renameat SIGFE
+renameat2 SIGFE
 res_close = __res_close SIGFE
 res_init = __res_init SIGFE
 res_mkquery = __res_mkquery SIGFE
@@ -1371,6 +1376,7 @@ strncmp NOSIGFE
 strncpy NOSIGFE
 strndup SIGFE
 strnlen NOSIGFE
+strnstr NOSIGFE
 strpbrk NOSIGFE
 strptime SIGFE
 strptime_l SIGFE

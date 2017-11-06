@@ -790,7 +790,8 @@ arm
 bexkat1
 i386
 nds32
-spu'
+spu
+riscv'
 
 # Initialize some variables set by options.
 ac_init_help=
@@ -11797,6 +11798,8 @@ subdirs="$subdirs aarch64"
 	nds32) subdirs="$subdirs nds32"
  ;;
 	spu) subdirs="$subdirs spu"
+ ;;
+	riscv) subdirs="$subdirs riscv"
  ;;
   esac;
   if test "${use_libtool}" = "yes"; then

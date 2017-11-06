@@ -31,6 +31,7 @@ if test -n "${libm_machine_dir}"; then
 	nds32) AC_CONFIG_SUBDIRS(nds32) ;;
 	spu) AC_CONFIG_SUBDIRS(spu) ;;
 	bexkat1) AC_CONFIG_SUBDIRS(bexkat1) ;;
+	riscv) AC_CONFIG_SUBDIRS(riscv) ;;
   esac;
   if test "${use_libtool}" = "yes"; then
     machlib=${libm_machine_dir}/lib${libm_machine_dir}.${aext}

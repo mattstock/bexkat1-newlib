@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2001 David E. O'Brien.
+ * Copyright (c) 2001 Mike Barcroft <mike@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -22,20 +22,15 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
-/*
- * This is a Solaris compatibility header
- */
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: head/lib/libc/stdlib/imaxabs.c 86368 2001-11-15 02:05:03Z mike $");
 
-#ifndef	_SYS_ELF_H_
-#define	_SYS_ELF_H_
-
-#include <sys/types.h>
-#include <machine/elf.h>
-#include <sys/elf32.h>
-#include <sys/elf64.h>
-
-#endif /* !_SYS_ELF_H_ */
+#include <inttypes.h>
+#include <stdint.h>
+intmax_t
+imaxabs(intmax_t j)
+{
+	return (j < 0 ? -j : j);
+}

@@ -60,6 +60,7 @@ details. */
 #include "tls_pbuf.h"
 #include "sync.h"
 #include "child_info.h"
+#include <cygwin/fs.h>  /* needed for RENAME_NOREPLACE */
 
 #undef _close
 #undef _lseek
@@ -272,7 +273,7 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
      mixed case or in all upper case.  That's a problem when using
      casesensitivity.  If the file handle given to FileRenameInformation
      has been opened casesensitive, the call also handles the path to the
-     target dir casesensitive.  Rather then trying to find the right name
+     target dir casesensitive.  Rather than trying to find the right name
      of the recycler, we just reopen the file to move with OBJ_CASE_INSENSITIVE,
      so the subsequent FileRenameInformation works caseinsensitive in terms of
      the recycler directory name, too. */
@@ -307,7 +308,7 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
       /* Is fname really a subcomponent of the full path?  If not, there's
 	 a high probability we're acessing the file via a virtual drive
 	 created with "subst".  Check and accommodate it.  Note that we
-	 ony get here if the virtual drive is really pointing to a local
+	 only get here if the virtual drive is really pointing to a local
 	 drive.  Otherwise pc.isremote () returns "true". */
       if (!RtlEqualUnicodePathSuffix (pc.get_nt_native_path (), &fname, TRUE))
 	{
@@ -373,7 +374,7 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
      names. */
   RtlAppendUnicodeToString (&recycler,
 			    (pc.fs_flags () & FILE_UNICODE_ON_DISK
-			     && !pc.fs_is_samba () && !pc.fs_is_netapp ())
+			     && !pc.fs_is_samba ())
 			    ? L".\xdc63\xdc79\xdc67" : L".cyg");
   pfii = (PFILE_INTERNAL_INFORMATION) infobuf;
   /* Note: Modern Samba versions apparently don't like buffer sizes of more
@@ -393,7 +394,7 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
   /* Shoot. */
   pfri = (PFILE_RENAME_INFORMATION) infobuf;
   pfri->ReplaceIfExists = TRUE;
-  pfri->RootDirectory = pc.isremote () ? NULL : rootdir;
+  pfri->RootDirectory = rootdir;
   pfri->FileNameLength = recycler.Length;
   memcpy (pfri->FileName, recycler.Buffer, recycler.Length);
   frisiz = sizeof *pfri + pfri->FileNameLength - sizeof (WCHAR);
@@ -500,8 +501,11 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
      Otherwise the below code closes the handle to allow replacing the file. */
   status = NtSetInformationFile (fh, &io, &disp, sizeof disp,
 				 FileDispositionInformation);
-  if (status == STATUS_DIRECTORY_NOT_EMPTY)
+  switch (status)
     {
+    case STATUS_SUCCESS:
+      break;
+    case STATUS_DIRECTORY_NOT_EMPTY:
       /* Uh oh!  This was supposed to be avoided by the check_dir_not_empty
 	 test in unlink_nt, but given that the test isn't atomic, this *can*
 	 happen.  Try to move the dir back ASAP. */
@@ -519,6 +523,36 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
 	  bin_stat = dir_not_empty;
 	  goto out;
 	}
+      debug_printf ("Renaming dir %S back to %S failed, status = %y",
+		    &recycler, pc.get_nt_native_path (), status);
+      break;
+    case STATUS_FILE_RENAMED:
+      /* On NFS, the subsequent request to set the delete disposition fails
+	 with STATUS_FILE_RENAMED.  We have to reopen the file, close the
+	 original handle, and set the delete disposition on the reopened
+	 handle to make sure setting delete disposition works. */
+      InitializeObjectAttributes (&attr, &ro_u_empty, 0, fh, NULL);
+      status = NtOpenFile (&tmp_fh, access, &attr, &io,
+			   FILE_SHARE_VALID_FLAGS, flags);
+      if (!NT_SUCCESS (status))
+	debug_printf ("NtOpenFile (%S) for reopening in renamed case failed, "
+		      "status = %y", pc.get_nt_native_path (), status);
+      else
+	{
+	  NtClose (fh);
+	  fh = tmp_fh;
+	  status = NtSetInformationFile (fh, &io, &disp, sizeof disp,
+					 FileDispositionInformation);
+	  if (!NT_SUCCESS (status))
+	    debug_printf ("Setting delete disposition %S (%S) in renamed "
+			  "case failed, status = %y",
+			  &recycler, pc.get_nt_native_path (), status);
+	}
+      break;
+    default:
+      debug_printf ("Setting delete disposition on %S (%S) failed, status = %y",
+		    &recycler, pc.get_nt_native_path (), status);
+      break;
     }
   /* In case of success, restore R/O attribute to accommodate hardlinks.
      That leaves potentially hardlinks around with the R/O bit suddenly
@@ -529,8 +563,8 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
   NtClose (fh);
   fh = NULL; /* So unlink_nt doesn't close the handle twice. */
   /* On success or when trying to unlink a directory we just return here.
-     The below code only works for files. */
-  if (NT_SUCCESS (status) || pc.isdir ())
+     The below code only works for files.  It also fails on NFS. */
+  if (NT_SUCCESS (status) || pc.isdir () || pc.fs_is_nfs ())
     goto out;
   /* The final trick.  We create a temporary file with delete-on-close
      semantic and rename that file to the file just moved to the bin.
@@ -539,15 +573,30 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
      delete-on-close on the original file succeeds.  There are still
      cases in which this fails, for instance, when trying to delete a
      hardlink to a DLL used by the unlinking application itself. */
-  RtlAppendUnicodeToString (&recycler, L"X");
-  InitializeObjectAttributes (&attr, &recycler, 0, rootdir, NULL);
+  if (pc.isremote ())
+    {
+      /* In the remote case we need the full path, but recycler is only
+	 a relative path.  Convert to absolute path. */
+      RtlInitEmptyUnicodeString (&fname, (PCWSTR) tp.w_get (),
+				 (NT_MAX_PATH - 1) * sizeof (WCHAR));
+      RtlCopyUnicodeString (&fname, pc.get_nt_native_path ());
+      RtlSplitUnicodePath (&fname, &fname, NULL);
+      /* Reset max length, overwritten by RtlSplitUnicodePath. */
+      fname.MaximumLength = (NT_MAX_PATH - 1) * sizeof (WCHAR); /* reset */
+      RtlAppendUnicodeStringToString (&fname, &recycler);
+    }
+  else
+    fname = recycler;
+  RtlAppendUnicodeToString (&fname, L"X");
+  InitializeObjectAttributes (&attr, &fname, 0, rootdir, NULL);
   status = NtCreateFile (&tmp_fh, DELETE, &attr, &io, NULL,
 			 FILE_ATTRIBUTE_NORMAL, 0, FILE_SUPERSEDE,
 			 FILE_NON_DIRECTORY_FILE | FILE_DELETE_ON_CLOSE,
 			 NULL, 0);
   if (!NT_SUCCESS (status))
     {
-      debug_printf ("Creating file for overwriting failed, status = %y",
+      debug_printf ("Creating file %S for overwriting %S (%S) failed, "
+		    "status = %y", &fname, &recycler, pc.get_nt_native_path (),
 		    status);
       goto out;
     }
@@ -555,7 +604,8 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
 				 FileRenameInformation);
   NtClose (tmp_fh);
   if (!NT_SUCCESS (status))
-    debug_printf ("Overwriting with another file failed, status = %y", status);
+    debug_printf ("Overwriting %S (%S) with %S failed, status = %y",
+		  &recycler, pc.get_nt_native_path (), &fname, status);
 
 out:
   if (rootdir)
@@ -740,15 +790,19 @@ retry_open:
     {
       debug_printf ("Sharing violation when opening %S",
 		    pc.get_nt_native_path ());
-      /* We never call try_to_bin on NFS and NetApp for the follwing reasons:
+      /* We never call try_to_bin on NetApp.  Netapp filesystems don't
+	 understand the "move and delete" method at all and have all kinds
+	 of weird effects.  Just setting the delete dispositon usually
+	 works fine, though.
 
 	 NFS implements its own mechanism to remove in-use files, which looks
-	 quite similar to what we do in try_to_bin for remote files.
-
-	 Netapp filesystems don't understand the "move and delete" method
-	 at all and have all kinds of weird effects.  Just setting the delete
-	 dispositon usually works fine, though. */
-      if (!pc.fs_is_nfs () && !pc.fs_is_netapp ())
+	 quite similar to what we do in try_to_bin for remote files.  However,
+	 apparently it doesn't work as desired in all cases.  This has been
+	 observed when running the gawk 4.1.62++ testcase "testext.awk" under
+	 Windows 10.  So for NFS we still call try_to_bin to rename the file,
+	 at least to make room for subsequent creation of a file with the
+	 same filename. */
+      if (!pc.fs_is_netapp ())
 	bin_stat = move_to_bin;
       /* If the file is not a directory, of if we didn't set the move_to_bin
 	 flag, just proceed with the FILE_SHARE_VALID_FLAGS set. */
@@ -2048,14 +2102,19 @@ nt_path_has_executable_suffix (PUNICODE_STRING upath)
   return false;
 }
 
-extern "C" int
-rename (const char *oldpath, const char *newpath)
+/* If newpath names an existing file and the RENAME_NOREPLACE flag is
+   specified, fail with EEXIST.  Exception: Don't fail if the purpose
+   of the rename is just to change the case of oldpath on a
+   case-insensitive file system. */
+static int
+rename2 (const char *oldpath, const char *newpath, unsigned int flags)
 {
   tmp_pathbuf tp;
   int res = -1;
   path_conv oldpc, newpc, new2pc, *dstpc, *removepc = NULL;
   bool old_dir_requested = false, new_dir_requested = false;
   bool old_explicit_suffix = false, new_explicit_suffix = false;
+  bool noreplace = flags & RENAME_NOREPLACE;
   size_t olen, nlen;
   bool equal_path;
   NTSTATUS status = STATUS_SUCCESS;
@@ -2068,6 +2127,12 @@ rename (const char *oldpath, const char *newpath)
 
   __try
     {
+      if (flags & ~RENAME_NOREPLACE)
+	/* RENAME_NOREPLACE is the only flag currently supported. */
+	{
+	  set_errno (EINVAL);
+	  __leave;
+	}
       if (!*oldpath || !*newpath)
 	{
 	  /* Reject rename("","x"), rename("x","").  */
@@ -2337,6 +2402,13 @@ rename (const char *oldpath, const char *newpath)
 	  __leave;
 	}
 
+      /* Should we replace an existing file? */
+      if ((removepc || dstpc->exists ()) && noreplace)
+	{
+	  set_errno (EEXIST);
+	  __leave;
+	}
+
       /* Opening the file must be part of the transaction.  It's not sufficient
 	 to call only NtSetInformationFile under the transaction.  Therefore we
 	 have to start the transaction here, if necessary. */
@@ -2491,11 +2563,15 @@ rename (const char *oldpath, const char *newpath)
 	  __leave;
 	}
       pfri = (PFILE_RENAME_INFORMATION) tp.w_get ();
-      pfri->ReplaceIfExists = TRUE;
+      pfri->ReplaceIfExists = !noreplace;
       pfri->RootDirectory = NULL;
       pfri->FileNameLength = dstpc->get_nt_native_path ()->Length;
       memcpy (&pfri->FileName,  dstpc->get_nt_native_path ()->Buffer,
 	      pfri->FileNameLength);
+      /* If dstpc points to an existing file and RENAME_NOREPLACE has
+	 been specified, then we should get NT error
+	 STATUS_OBJECT_NAME_COLLISION ==> Win32 error
+	 ERROR_ALREADY_EXISTS ==> Cygwin error EEXIST. */
       status = NtSetInformationFile (fh, &io, pfri,
 				     sizeof *pfri + pfri->FileNameLength,
 				     FileRenameInformation);
@@ -2576,6 +2652,12 @@ rename (const char *oldpath, const char *newpath)
   if (get_errno () != EFAULT)
     syscall_printf ("%R = rename(%s, %s)", res, oldpath, newpath);
   return res;
+}
+
+extern "C" int
+rename (const char *oldpath, const char *newpath)
+{
+  return rename2 (oldpath, newpath, 0);
 }
 
 extern "C" int
@@ -2855,7 +2937,7 @@ posix_fadvise (int fd, off_t offset, off_t len, int advice)
   if (cfd >= 0)
     res = cfd->fadvise (offset, len, advice);
   else
-    set_errno (EBADF);
+    res = EBADF;
   syscall_printf ("%R = posix_fadvice(%d, %D, %D, %d)",
 		  res, fd, offset, len, advice);
   return res;
@@ -2864,16 +2946,16 @@ posix_fadvise (int fd, off_t offset, off_t len, int advice)
 extern "C" int
 posix_fallocate (int fd, off_t offset, off_t len)
 {
-  int res = -1;
+  int res = 0;
   if (offset < 0 || len == 0)
-    set_errno (EINVAL);
+    res = EINVAL;
   else
     {
       cygheap_fdget cfd (fd);
       if (cfd >= 0)
 	res = cfd->ftruncate (offset + len, false);
       else
-	set_errno (EBADF);
+	res = EBADF;
     }
   syscall_printf ("%R = posix_fallocate(%d, %D, %D)", res, fd, offset, len);
   return res;
@@ -2885,7 +2967,14 @@ ftruncate64 (int fd, off_t length)
   int res = -1;
   cygheap_fdget cfd (fd);
   if (cfd >= 0)
-    res = cfd->ftruncate (length, true);
+    {
+      res = cfd->ftruncate (length, true);
+      if (res)
+	{
+	  set_errno (res);
+	  res = -1;
+	}
+    }
   else
     set_errno (EBADF);
   syscall_printf ("%R = ftruncate(%d, %D)", res, fd, length);
@@ -4719,8 +4808,8 @@ readlinkat (int dirfd, const char *__restrict pathname, char *__restrict buf,
 }
 
 extern "C" int
-renameat (int olddirfd, const char *oldpathname,
-	  int newdirfd, const char *newpathname)
+renameat2 (int olddirfd, const char *oldpathname,
+	   int newdirfd, const char *newpathname, unsigned int flags)
 {
   tmp_pathbuf tp;
   __try
@@ -4731,11 +4820,18 @@ renameat (int olddirfd, const char *oldpathname,
       char *newpath = tp.c_get ();
       if (gen_full_path_at (newpath, newdirfd, newpathname))
 	__leave;
-      return rename (oldpath, newpath);
+      return rename2 (oldpath, newpath, flags);
     }
   __except (EFAULT) {}
   __endtry
   return -1;
+}
+
+extern "C" int
+renameat (int olddirfd, const char *oldpathname,
+	  int newdirfd, const char *newpathname)
+{
+  return renameat2 (olddirfd, oldpathname, newdirfd, newpathname, 0);
 }
 
 extern "C" int

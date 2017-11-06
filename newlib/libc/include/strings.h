@@ -50,7 +50,7 @@ void	 bzero(void *, size_t);					/* LEGACY */
 #if __BSD_VISIBLE
 void	 explicit_bzero(void *, size_t);
 #endif
-#if __XSI_VISIBLE
+#if __MISC_VISIBLE || __POSIX_VISIBLE < 200809 || __XSI_VISIBLE >= 700
 int	 ffs(int) __pure2;
 #endif
 #if __BSD_VISIBLE

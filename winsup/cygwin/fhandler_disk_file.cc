@@ -161,63 +161,26 @@ path_conv::isgood_inode (ino_t ino) const
   return true;
 }
 
-/* Check reparse point to determine if it should be treated as a posix symlink
-   or as a normal file/directory. Mount points are treated as normal directories
-   to match behavior of other systems. Unknown reparse tags are used for
-   things other than links (HSM, compression, dedup), and generally should be
-   treated as a normal file/directory. Native symlinks and mount points are
-   treated as posix symlinks, depending on the prefix of the target name.
-   This logic needs to agree with equivalent logic in path.cc
-   symlink_info::check_reparse_point() .
-   */
+/* Check reparse point to determine if it should be treated as a
+   posix symlink or as a normal file/directory.  Logic is explained
+   in detail in check_reparse_point_target in path.cc. */
 static inline bool
 readdir_check_reparse_point (POBJECT_ATTRIBUTES attr, bool remote)
 {
-  bool ret = false;
-  IO_STATUS_BLOCK io;
+  NTSTATUS status;
   HANDLE reph;
-  UNICODE_STRING subst;
+  IO_STATUS_BLOCK io;
+  tmp_pathbuf tp;
+  UNICODE_STRING symbuf;
+  bool ret = false;
 
-  if (NT_SUCCESS (NtOpenFile (&reph, READ_CONTROL, attr, &io,
-			      FILE_SHARE_VALID_FLAGS,
-			      FILE_OPEN_FOR_BACKUP_INTENT
-			      | FILE_OPEN_REPARSE_POINT)))
+  status = NtOpenFile (&reph, READ_CONTROL, attr, &io, FILE_SHARE_VALID_FLAGS,
+		       FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT);
+  if (NT_SUCCESS (status))
     {
-      PREPARSE_DATA_BUFFER rp = (PREPARSE_DATA_BUFFER)
-		  alloca (MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
-      if (NT_SUCCESS (NtFsControlFile (reph, NULL, NULL, NULL,
-		      &io, FSCTL_GET_REPARSE_POINT, NULL, 0,
-		      (LPVOID) rp, MAXIMUM_REPARSE_DATA_BUFFER_SIZE)))
-	{
-	  /* If reparse point is stored on a remote volume, lstat returns
-	     them as normal files or dirs, not as symlink.  For a description,
-	     see the comment preceeding remote check in
-	     symlink_info::check_reparse_point. */
-	  if (!remote && rp->ReparseTag == IO_REPARSE_TAG_MOUNT_POINT)
-	    {
-	      RtlInitCountedUnicodeString (&subst,
-		  (WCHAR *)((char *)rp->MountPointReparseBuffer.PathBuffer
-			    + rp->MountPointReparseBuffer.SubstituteNameOffset),
-		  rp->MountPointReparseBuffer.SubstituteNameLength);
-	      if (check_reparse_point_target (&subst))
-	        ret = true;
-	    }
-	  else if (rp->ReparseTag == IO_REPARSE_TAG_SYMLINK)
-	    {
-	      if (rp->SymbolicLinkReparseBuffer.Flags & SYMLINK_FLAG_RELATIVE)
-		ret = true;
-	      else
-		{
-		  RtlInitCountedUnicodeString (&subst,
-		      (WCHAR *)((char *)rp->SymbolicLinkReparseBuffer.PathBuffer
-			    + rp->SymbolicLinkReparseBuffer.SubstituteNameOffset),
-		      rp->SymbolicLinkReparseBuffer.SubstituteNameLength);
-		  if (check_reparse_point_target (&subst))
-		    ret = true;
-		}
-	    }
-	  NtClose (reph);
-	}
+      PREPARSE_DATA_BUFFER rp = (PREPARSE_DATA_BUFFER) tp.c_get ();
+      ret = (check_reparse_point_target (reph, remote, rp, &symbuf) > 0);
+      NtClose (reph);
     }
   return ret;
 }
@@ -1112,10 +1075,7 @@ int
 fhandler_disk_file::fadvise (off_t offset, off_t length, int advice)
 {
   if (advice < POSIX_FADV_NORMAL || advice > POSIX_FADV_NOREUSE)
-    {
-      set_errno (EINVAL);
-      return -1;
-    }
+    return EINVAL;
 
   /* Windows only supports advice flags for the whole file.  We're using
      a simplified test here so that we don't have to ask for the actual
@@ -1134,9 +1094,7 @@ fhandler_disk_file::fadvise (off_t offset, off_t length, int advice)
   NTSTATUS status = NtQueryInformationFile (get_handle (), &io,
 					    &fmi, sizeof fmi,
 					    FileModeInformation);
-  if (!NT_SUCCESS (status))
-    __seterrno_from_nt_status (status);
-  else
+  if (NT_SUCCESS (status))
     {
       fmi.Mode &= ~FILE_SEQUENTIAL_ONLY;
       if (advice == POSIX_FADV_SEQUENTIAL)
@@ -1148,20 +1106,20 @@ fhandler_disk_file::fadvise (off_t offset, off_t length, int advice)
       __seterrno_from_nt_status (status);
     }
 
-  return -1;
+  return geterrno_from_nt_status (status);
 }
 
 int
 fhandler_disk_file::ftruncate (off_t length, bool allow_truncate)
 {
-  int res = -1;
+  int res = 0;
 
   if (length < 0 || !get_handle ())
-    set_errno (EINVAL);
+    res = EINVAL;
   else if (pc.isdir ())
-    set_errno (EISDIR);
+    res = EISDIR;
   else if (!(get_access () & GENERIC_WRITE))
-    set_errno (EBADF);
+    res = EBADF;
   else
     {
       NTSTATUS status;
@@ -1172,10 +1130,7 @@ fhandler_disk_file::ftruncate (off_t length, bool allow_truncate)
       status = NtQueryInformationFile (get_handle (), &io, &fsi, sizeof fsi,
 				       FileStandardInformation);
       if (!NT_SUCCESS (status))
-	{
-	  __seterrno_from_nt_status (status);
-	  return -1;
-	}
+	return geterrno_from_nt_status (status);
 
       /* If called through posix_fallocate, silently succeed if length
 	 is less than the file's actual length. */
@@ -1201,9 +1156,7 @@ fhandler_disk_file::ftruncate (off_t length, bool allow_truncate)
 				     &feofi, sizeof feofi,
 				     FileEndOfFileInformation);
       if (!NT_SUCCESS (status))
-	__seterrno_from_nt_status (status);
-      else
-	res = 0;
+	res = geterrno_from_nt_status (status);
     }
   return res;
 }
