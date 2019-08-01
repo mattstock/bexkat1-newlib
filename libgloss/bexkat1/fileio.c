@@ -299,60 +299,45 @@ const driver_t *driver_list[] = {
 };
 
 off_t
-_DEFUN (_lseek, (fd, offset, whence),
-	int fd _AND
-	off_t offset _AND
-	int whence)
+_lseek (int fd, off_t offset, int whence)
 {
   return driver_list[fd]->lseek(fd, offset, whence);
 }
 
 #if 0
 int
-_DEFUN (access, (path, mode),
-	const char *path _AND
-	int mode)
+access (const char *path, int mode)
 {
   return fatfs_access(path, mode);
 }
 
 int
-_DEFUN (mkdir, (path, mode),
-	const char *path _AND
-	mode_t mode)
+mkdir (const char *path, mode_t mode)
 {
   return fatfs_mkdir(path, mode);
 }
 
 int
-_DEFUN (_stat, (path, buf),
-       const char *path _AND
-       struct stat *buf)
+_stat (const char *path, struct stat *buf)
 {
   return fatfs_stat(path, buf);
 }
 #endif
 
 int
-_DEFUN (_fstat, (fd, buf),
-       int fd _AND
-       struct stat *buf)
+_fstat (int fd, struct stat *buf)
 {
   return driver_list[fd]->fstat(fd, buf);
 }
 
 int
-_DEFUN (_close, (file),
-	int file)
+_close (int file)
 {
   return driver_list[file]->close(file);
 }
 
 int
-_DEFUN (_open, (path, flags, mode),
-	const char *path _AND
-	int flags _AND
-	int mode)
+_open (const char *path, int flags, int mode)
 {
   int i;
   int fd = 4;
@@ -366,19 +351,13 @@ _DEFUN (_open, (path, flags, mode),
 }
 
 int
-_DEFUN (_read, (file, buf, nbytes),
-	int file _AND
-	char *buf _AND
-	int nbytes)
+_read (int file, char *buf, int nbytes)
 {
   return driver_list[file]->read(file, buf, nbytes);
 }
 
 int
-_DEFUN (_write, (file, ptr, len),
-	int file _AND
-	char *ptr _AND
-	int len)
+_write (int file, char *ptr, int len)
 {
   return driver_list[file]->write(file, ptr, len);
 }

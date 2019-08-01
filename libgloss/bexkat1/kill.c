@@ -20,9 +20,7 @@ extern void _exit (int) __attribute__((__noreturn__));
  * kill -- go out via exit...
  */
 int
-_DEFUN (_kill, (pid, sig),
-        int pid _AND 
-        int sig)
+_kill (int pid, int sig)
 {
   if(pid == __MYPID)
     _exit(sig);

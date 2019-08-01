@@ -8,8 +8,7 @@
  * unlink
  */
 int
-_DEFUN (_unlink, (name),
-	const char *name)
+_unlink (const char *name)
 {
   errno = ENOSYS;
   return -1;

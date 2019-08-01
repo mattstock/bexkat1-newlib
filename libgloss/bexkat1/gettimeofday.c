@@ -44,8 +44,7 @@ time_t fat2time(int fatdate, int fattime) {
  * time -- return current time in seconds.
  */
 time_t
-_DEFUN (_time, _time (t),
-	time_t *t)
+_time (time_t *t)
 {
   struct tm tm;
   time_t ret;
@@ -86,9 +85,7 @@ _DEFUN (_time, _time (t),
  * return the microseconds.
  */
 int
-_DEFUN (_gettimeofday, _gettimeofday (tv, tz),
-	struct timeval *tv _AND
-	void *tzvp)
+_gettimeofday (struct timeval *tv, void *tzvp)
 {
   struct timezone *tz = tzvp;
   struct tm tm;
