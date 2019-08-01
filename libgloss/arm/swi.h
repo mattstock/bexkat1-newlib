@@ -30,10 +30,12 @@
 
 
 /* Now the SWI numbers and reason codes for RDI (Angel) monitors.  */
-#if defined (SEMIHOST_V2) && defined (SEMIHOST_V2_MIXED_MODE)
-  #define AngelSWI_ARM			0xF000 /* HLT A32.  */
+#if defined (SEMIHOST_V2) \
+    && defined (SEMIHOST_V2_MIXED_MODE) \
+    && !defined (THUMB_VXM)
+  #define AngelSWI_ARM			0xE10F0070 /* HLT #0xF000 A32.  */
   #ifdef __thumb__
-    #define AngelSWI			0x3C /* HLT T32.  */
+    #define AngelSWI			0xBABC /* HLT #0x3c T32.  */
   #else /* __thumb__.  */
     #define AngelSWI			AngelSWI_ARM
   #endif /* __thumb__.  */
@@ -49,10 +51,16 @@
 /* For thumb only architectures use the BKPT instruction instead of SWI.  */
 #ifdef THUMB_VXM
   #define AngelSWIInsn			"bkpt"
-  #define AngelSWIAsm			bkpt
+  #define AngelSWIAsm(IMM)		bkpt IMM
+#elif defined (SEMIHOST_V2) && defined (SEMIHOST_V2_MIXED_MODE)
+  /* This is actually encoding the HLT instruction, however we don't have
+     support for this in older assemblers.  So we have to encode the
+     instruction manually.  */
+  #define AngelSWIInsn			".inst"
+  #define AngelSWIAsm(IMM)		.inst IMM
 #else
   #define AngelSWIInsn			"swi"
-  #define AngelSWIAsm			swi
+  #define AngelSWIAsm(IMM)		swi IMM
 #endif
 
 /* The reason codes:  */
@@ -96,9 +104,9 @@
 #define SH_EXT_STDOUT_STDERR_BITNUM	0x1
 
 #if !defined (__ASSEMBLER__)
-extern int _get_semihosting_exts _PARAMS ((char*, int, int));
-extern int _has_ext_exit_extended _PARAMS ((void));
-extern int _has_ext_stdout_stderr _PARAMS ((void));
+extern int _get_semihosting_exts (char*, int, int);
+extern int _has_ext_exit_extended (void);
+extern int _has_ext_stdout_stderr (void);
 #endif
 
 #if defined(ARM_RDI_MONITOR) && !defined(__ASSEMBLER__)

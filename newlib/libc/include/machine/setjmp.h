@@ -2,7 +2,10 @@
 _BEGIN_STD_C
 
 #if defined(__or1k__) || defined(__or1knd__)
-#define _JBLEN 31 /* 32 GPRs - r0 */
+/*
+ * r1, r2, r9, r14, r16 .. r30, SR.
+ */
+#define _JBLEN 13
 #define _JBTYPE unsigned long
 #endif
 
@@ -363,7 +366,9 @@ _BEGIN_STD_C
 #endif
 
 #ifdef __riscv
-#define _JBTYPE long
+/* _JBTYPE using long long to make sure the alignment is align to 8 byte,
+   otherwise in rv32imafd, store/restore FPR may mis-align.  */
+#define _JBTYPE long long
 #ifdef __riscv_32e
 #define _JBLEN ((4*sizeof(long))/sizeof(long))
 #else
