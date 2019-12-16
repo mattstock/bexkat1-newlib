@@ -791,8 +791,10 @@ arm
 bexkat1
 i386
 nds32
+pru
 spu
-riscv'
+riscv
+x86_64'
 
 # Initialize some variables set by options.
 ac_init_help=
@@ -11454,7 +11456,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 11456 "configure"
+#line 11458 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -11560,7 +11562,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 11562 "configure"
+#line 11564 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -11815,9 +11817,13 @@ subdirs="$subdirs aarch64"
  ;;
 	nds32) subdirs="$subdirs nds32"
  ;;
+	pru) subdirs="$subdirs pru"
+ ;;
 	spu) subdirs="$subdirs spu"
  ;;
 	riscv) subdirs="$subdirs riscv"
+ ;;
+	x86_64) subdirs="$subdirs x86_64"
  ;;
   esac;
   if test "${use_libtool}" = "yes"; then

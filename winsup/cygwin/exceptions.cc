@@ -42,6 +42,7 @@ details. */
 
 #define CALL_HANDLER_RETRY_OUTER 10
 #define CALL_HANDLER_RETRY_INNER 10
+#define DUMPSTACK_FRAME_LIMIT    32
 
 PWCHAR debugger_command;
 extern uint8_t _sigbe;
@@ -382,7 +383,7 @@ cygwin_exception::dumpstack ()
 #else
       small_printf ("Stack trace:\r\nFrame     Function  Args\r\n");
 #endif
-      for (i = 0; i < 16 && thestack++; i++)
+      for (i = 0; i < DUMPSTACK_FRAME_LIMIT && thestack++; i++)
 	{
 	  small_printf (_AFMT "  " _AFMT, thestack.sf.AddrFrame.Offset,
 			thestack.sf.AddrPC.Offset);
@@ -392,7 +393,8 @@ cygwin_exception::dumpstack ()
 	  small_printf (")\r\n");
 	}
       small_printf ("End of stack trace%s\n",
-		    i == 16 ? " (more stack frames may be present)" : "");
+		    i == DUMPSTACK_FRAME_LIMIT ?
+		        " (more stack frames may be present)" : "");
       if (h)
 	NtClose (h);
     }
@@ -949,7 +951,7 @@ _cygtls::interrupt_setup (siginfo_t& si, void *handler, struct sigaction& siga)
   if (incyg)
     set_signal_arrived ();
 
-  if (!have_execed)
+  if (!have_execed && !(myself->exec_sendsig && !ch_spawn.iscygwin ()))
     proc_subproc (PROC_CLEARWAIT, 1);
   sigproc_printf ("armed signal_arrived %p, signal %d",
 		  signal_arrived, si.si_signo);
@@ -1469,14 +1471,6 @@ sigpacket::process ()
   if (issig_wait)
     {
       tls->sigwait_mask = 0;
-      /* If the catching thread is running select on a signalfd, don't call
-	 the signal handler and don't remove the signal from the queue. */
-      if (tls->signalfd_select_wait)
-	{
-	  SetEvent (tls->signalfd_select_wait);
-	  rc = 0;
-	  goto done;
-	}
       goto dosig;
     }
 

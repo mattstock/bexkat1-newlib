@@ -711,6 +711,7 @@ spu
 tic6x
 iq2000
 or1k
+pru
 nios2
 libnosys'
 
@@ -2556,7 +2557,7 @@ case "${target}" in
 	subdirs="$subdirs m32c"
 
 	;;
-  msp430*-*-elf)
+  msp430-*-elf*)
 	subdirs="$subdirs msp430"
 
 	config_libnosys=false
@@ -2590,6 +2591,10 @@ case "${target}" in
 	;;
   or1k-*-* | or1knd-*-* )
 	subdirs="$subdirs or1k"
+
+	;;
+  pru-*-*)
+	subdirs="$subdirs pru"
 
 	;;
   nios2-*-*)
@@ -3883,6 +3888,7 @@ cat >>$CONFIG_STATUS <<_ACEOF || ac_write_fail=1
 AMDEP_TRUE="$AMDEP_TRUE" ac_aux_dir="$ac_aux_dir"
 srcdir=${srcdir}
 target=${target}
+host=${host}
 with_multisubdir=${with_multisubdir}
 ac_configure_args="--enable-multilib ${ac_configure_args}"
 CONFIG_SHELL=${CONFIG_SHELL-/bin/sh}

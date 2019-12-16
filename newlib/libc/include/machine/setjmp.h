@@ -242,7 +242,7 @@ _BEGIN_STD_C
 #endif
 
 #ifdef __moxie__
-#define _JBLEN 16
+#define _JBLEN 19
 #endif
 
 #ifdef __CRX__
@@ -354,6 +354,11 @@ _BEGIN_STD_C
 #ifdef __NIOS2__
 #define _JBLEN 40
 #define _JBTYPE unsigned long
+#endif
+
+#ifdef __PRU__
+#define _JBLEN 48
+#define _JBTYPE unsigned int
 #endif
 
 #ifdef __RX__

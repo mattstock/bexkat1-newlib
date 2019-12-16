@@ -710,6 +710,7 @@ peek_pipe (select_record *s, bool from_select)
     }
 
 out:
+  h = fh->get_output_handle_cyg ();
   if (s->write_selected && dev != FH_PIPER)
     {
       gotone += s->write_ready =  pipe_data_available (s->fd, fh, h, true);
@@ -1045,7 +1046,9 @@ peek_console (select_record *me, bool)
       else if (!PeekConsoleInputW (h, &irec, 1, &events_read) || !events_read)
 	break;
       fh->acquire_input_mutex (INFINITE);
-      if (fhandler_console::input_winch == fh->process_input_message ())
+      if (fhandler_console::input_winch == fh->process_input_message ()
+	  && global_sigs[SIGWINCH].sa_handler != SIG_IGN
+	  && global_sigs[SIGWINCH].sa_handler != SIG_DFL)
 	{
 	  set_sig_errno (EINTR);
 	  fh->release_input_mutex ();
@@ -1171,22 +1174,208 @@ static int
 verify_tty_slave (select_record *me, fd_set *readfds, fd_set *writefds,
 	   fd_set *exceptfds)
 {
-  if (IsEventSignalled (me->h))
+  fhandler_pty_slave *ptys = (fhandler_pty_slave *) me->fh;
+  if (me->read_selected && !ptys->to_be_read_from_pcon () &&
+      IsEventSignalled (ptys->input_available_event))
     me->read_ready = true;
   return set_bits (me, readfds, writefds, exceptfds);
+}
+
+static int
+peek_pty_slave (select_record *s, bool from_select)
+{
+  int gotone = 0;
+  fhandler_base *fh = (fhandler_base *) s->fh;
+  fhandler_pty_slave *ptys = (fhandler_pty_slave *) fh;
+
+  ptys->reset_switch_to_pcon ();
+
+  if (s->read_selected)
+    {
+      if (s->read_ready)
+	{
+	  select_printf ("%s, already ready for read", fh->get_name ());
+	  gotone = 1;
+	  goto out;
+	}
+
+      if (fh->bg_check (SIGTTIN, true) <= bg_eof)
+	{
+	  gotone = s->read_ready = true;
+	  goto out;
+	}
+
+      if (ptys->to_be_read_from_pcon ())
+	{
+	  if (ptys->is_line_input ())
+	    {
+	      INPUT_RECORD inp[INREC_SIZE];
+	      DWORD n;
+	      PeekConsoleInput (ptys->get_handle (), inp, INREC_SIZE, &n);
+	      bool end_of_line = false;
+	      while (n-- > 0)
+		if (inp[n].EventType == KEY_EVENT &&
+		    inp[n].Event.KeyEvent.bKeyDown &&
+		    inp[n].Event.KeyEvent.uChar.AsciiChar == '\r')
+		  end_of_line = true;
+	      if (end_of_line)
+		{
+		  gotone = s->read_ready = true;
+		  goto out;
+		}
+	      else
+		goto out;
+	    }
+	}
+
+      if (IsEventSignalled (ptys->input_available_event))
+	{
+	  gotone = s->read_ready = true;
+	  goto out;
+	}
+
+      if (!gotone && s->fh->hit_eof ())
+	{
+	  select_printf ("read: %s, saw EOF", fh->get_name ());
+	  if (s->except_selected)
+	    gotone += s->except_ready = true;
+	  if (s->read_selected)
+	    gotone += s->read_ready = true;
+	}
+    }
+
+out:
+  HANDLE h = ptys->get_output_handle_cyg ();
+  if (s->write_selected)
+    {
+      gotone += s->write_ready =  pipe_data_available (s->fd, fh, h, true);
+      select_printf ("write: %s, gotone %d", fh->get_name (), gotone);
+    }
+  return gotone;
+}
+
+static int pty_slave_startup (select_record *me, select_stuff *stuff);
+
+static DWORD WINAPI
+thread_pty_slave (void *arg)
+{
+  select_pipe_info *pi = (select_pipe_info *) arg;
+  DWORD sleep_time = 0;
+  bool looping = true;
+
+  while (looping)
+    {
+      for (select_record *s = pi->start; (s = s->next); )
+	if (s->startup == pty_slave_startup)
+	  {
+	    if (peek_pty_slave (s, true))
+	      looping = false;
+	    if (pi->stop_thread)
+	      {
+		select_printf ("stopping");
+		looping = false;
+		break;
+	      }
+	  }
+      if (!looping)
+	break;
+      Sleep (sleep_time >> 3);
+      if (sleep_time < 80)
+	++sleep_time;
+      if (pi->stop_thread)
+	break;
+    }
+  return 0;
+}
+
+static int
+pty_slave_startup (select_record *me, select_stuff *stuff)
+{
+  fhandler_base *fh = (fhandler_base *) me->fh;
+  fhandler_pty_slave *ptys = (fhandler_pty_slave *) fh;
+  if (me->read_selected)
+    ptys->mask_switch_to_pcon_in (true);
+
+  select_pipe_info *pi = stuff->device_specific_ptys;
+  if (pi->start)
+    me->h = *((select_pipe_info *) stuff->device_specific_ptys)->thread;
+  else
+    {
+      pi->start = &stuff->start;
+      pi->stop_thread = false;
+      pi->thread = new cygthread (thread_pty_slave, pi, "ptyssel");
+      me->h = *pi->thread;
+      if (!me->h)
+	return 0;
+    }
+  return 1;
+}
+
+static void
+pty_slave_cleanup (select_record *me, select_stuff *stuff)
+{
+  fhandler_base *fh = (fhandler_base *) me->fh;
+  fhandler_pty_slave *ptys = (fhandler_pty_slave *) fh;
+  if (me->read_selected)
+    ptys->mask_switch_to_pcon_in (false);
+
+  select_pipe_info *pi = (select_pipe_info *) stuff->device_specific_ptys;
+  if (!pi)
+    return;
+  if (pi->thread)
+    {
+      pi->stop_thread = true;
+      pi->thread->detach ();
+    }
+  delete pi;
+  stuff->device_specific_ptys = NULL;
 }
 
 select_record *
 fhandler_pty_slave::select_read (select_stuff *ss)
 {
+  if (!ss->device_specific_ptys
+      && (ss->device_specific_ptys = new select_pipe_info) == NULL)
+    return NULL;
   select_record *s = ss->start.next;
-  s->h = input_available_event;
-  s->startup = no_startup;
-  s->peek = peek_pipe;
+  s->startup = pty_slave_startup;
+  s->peek = peek_pty_slave;
   s->verify = verify_tty_slave;
   s->read_selected = true;
   s->read_ready = false;
-  s->cleanup = NULL;
+  s->cleanup = pty_slave_cleanup;
+  return s;
+}
+
+select_record *
+fhandler_pty_slave::select_write (select_stuff *ss)
+{
+  if (!ss->device_specific_ptys
+      && (ss->device_specific_ptys = new select_pipe_info) == NULL)
+    return NULL;
+  select_record *s = ss->start.next;
+  s->startup = pty_slave_startup;
+  s->peek = peek_pty_slave;
+  s->verify = verify_tty_slave;
+  s->write_selected = true;
+  s->write_ready = false;
+  s->cleanup = pty_slave_cleanup;
+  return s;
+}
+
+select_record *
+fhandler_pty_slave::select_except (select_stuff *ss)
+{
+  if (!ss->device_specific_ptys
+      && (ss->device_specific_ptys = new select_pipe_info) == NULL)
+    return NULL;
+  select_record *s = ss->start.next;
+  s->startup = pty_slave_startup;
+  s->peek = peek_pty_slave;
+  s->verify = verify_tty_slave;
+  s->except_selected = true;
+  s->except_ready = false;
+  s->cleanup = pty_slave_cleanup;
   return s;
 }
 
@@ -1847,80 +2036,6 @@ fhandler_windows::select_except (select_stuff *ss)
   return s;
 }
 
-static int start_thread_signalfd (select_record *, select_stuff *);
-
-static DWORD WINAPI
-thread_signalfd (void *arg)
-{
-  select_signalfd_info *si = (select_signalfd_info *) arg;
-  bool event = false;
-
-  while (!event)
-    {
-      sigset_t set = 0;
-      _cygtls *tls = si->start->tls;
-
-      for (select_record *s = si->start; (s = s->next); )
-	if (s->startup == start_thread_signalfd)
-	  set |= ((fhandler_signalfd *) s->fh)->get_sigset ();
-      set_signal_mask (tls->sigwait_mask, set);
-      tls->signalfd_select_wait = si->evt;
-      sig_dispatch_pending (true);
-      switch (WaitForSingleObject (si->evt, INFINITE))
-	{
-	case WAIT_OBJECT_0:
-	  tls->signalfd_select_wait = NULL;
-	  event = true;
-	  break;
-	default:
-	  break;
-	}
-      if (si->stop_thread)
-	break;
-      if (!event)
-	Sleep (1L);
-    }
-  CloseHandle (si->evt);
-  return 0;
-}
-
-static int
-start_thread_signalfd (select_record *me, select_stuff *stuff)
-{
-  select_signalfd_info *si;
-
-  if ((si = stuff->device_specific_signalfd))
-    {
-      me->h = *si->thread;
-      return 1;
-    }
-  si = new select_signalfd_info;
-  si->start = &stuff->start;
-  si->stop_thread = false;
-  si->evt = CreateEventW (&sec_none_nih, TRUE, FALSE, NULL);
-  si->thread = new cygthread (thread_signalfd, si, "signalfdsel");
-  me->h = *si->thread;
-  stuff->device_specific_signalfd = si;
-  return 1;
-}
-
-static void
-signalfd_cleanup (select_record *, select_stuff *stuff)
-{
-  select_signalfd_info *si;
-
-  if (!(si = stuff->device_specific_signalfd))
-    return;
-  if (si->thread)
-    {
-      si->stop_thread = true;
-      SetEvent (si->evt);
-      si->thread->detach ();
-    }
-  delete si;
-  stuff->device_specific_signalfd = NULL;
-}
-
 static int
 peek_signalfd (select_record *me, bool)
 {
@@ -1940,17 +2055,19 @@ verify_signalfd (select_record *me, fd_set *rfds, fd_set *wfds, fd_set *efds)
   return peek_signalfd (me, true);
 }
 
+extern HANDLE my_pendingsigs_evt;
+
 select_record *
 fhandler_signalfd::select_read (select_stuff *stuff)
 {
   select_record *s = stuff->start.next;
   if (!s->startup)
     {
-      s->startup = start_thread_signalfd;
+      s->startup = no_startup;
       s->verify = verify_signalfd;
-      s->cleanup = signalfd_cleanup;
     }
   s->peek = peek_signalfd;
+  s->h = my_pendingsigs_evt;	/* wait_sig sets this if signal are pending */
   s->read_selected = true;
   s->read_ready = false;
   return s;

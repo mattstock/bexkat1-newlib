@@ -1168,19 +1168,6 @@ path_conv::check (const char *src, unsigned opt,
 
       if (dev.isfs ())
 	{
-	  if (strncmp (path, "\\\\.\\", 4))
-	    {
-	      if (!tail || tail == path)
-		/* nothing */;
-	      else if (tail[-1] != '\\')
-		*tail = '\0';
-	      else
-		{
-		  error = ENOENT;
-		  return;
-		}
-	    }
-
 	  /* If FS hasn't been checked already in symlink_info::check,
 	     do so now. */
 	  if (fs.inited ()|| fs.update (get_nt_native_path (), NULL))
@@ -1419,15 +1406,18 @@ normalize_win32_path (const char *src, char *dst, char *&tail)
   bool beg_src_slash = isdirsep (src[0]);
 
   tail = dst;
-  /* Skip long path name prefixes in Win32 or NT syntax. */
+  /* Skip Win32 long path name prefix and NT object directory prefix. */
   if (beg_src_slash && (src[1] == '?' || isdirsep (src[1]))
       && src[2] == '?' && isdirsep (src[3]))
     {
       src += 4;
-      if (src[1] != ':') /* native UNC path */
+      if (isdrive (src) && isdirsep (src[2]))
+	beg_src_slash = false;
+      else if (!strncmp (src, "UNC", 3) && isdirsep (src[3]))
+	/* native UNC path */
 	src += 2; /* Fortunately the first char is not copied... */
       else
-	beg_src_slash = false;
+	return EINVAL;
     }
   if (beg_src_slash && isdirsep (src[1]))
     {
@@ -2905,7 +2895,8 @@ restart:
 	     slow down normal operation.  This extra check only kicks in if
 	     we encountered a STATUS_OBJECT_NAME_NOT_FOUND *and* we didn't
 	     already attach a suffix. */
-	  if (!restarted && !*ext_here && !(mount_flags & MOUNT_DOS))
+	  if (!restarted && !*ext_here && ext_here[-1] != '\\'
+	      && !(mount_flags & MOUNT_DOS))
 	    {
 	      /* Check for trailing dot or space or leading space in
 		 last component. */

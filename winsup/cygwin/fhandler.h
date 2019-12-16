@@ -43,6 +43,12 @@ details. */
 
 #define O_TMPFILE_FILE_ATTRS (FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_HIDDEN)
 
+/* Buffer size for ReadConsoleInput() and PeekConsoleInput(). */
+/* Per MSDN, max size of buffer required is below 64K. */
+/* (65536 / sizeof (INPUT_RECORD)) is 3276, however,
+   ERROR_NOT_ENOUGH_MEMORY occurs in win7 if this value is used. */
+#define INREC_SIZE 2048
+
 extern const char *windows_device_names[];
 extern struct __cygwin_perfile *perfile_table;
 #define __fmode (*(user_data->fmode_ptr))
@@ -1825,6 +1831,7 @@ enum cltype
 class dev_console
 {
   pid_t owner;
+  bool is_legacy;
 
   WORD default_color, underline_color, dim_color;
 
@@ -2019,6 +2026,7 @@ private:
   static bool need_invisible ();
   static void free_console ();
   static const char *get_nonascii_key (INPUT_RECORD& input_rec, char *);
+  static DWORD get_console_process_id (DWORD pid, bool match);
 
   fhandler_console (void *) {}
 
@@ -2051,8 +2059,8 @@ class fhandler_pty_common: public fhandler_termios
  public:
   fhandler_pty_common ()
     : fhandler_termios (),
-      output_mutex (NULL),
-    input_mutex (NULL), input_available_event (NULL)
+    output_mutex (NULL), input_mutex (NULL),
+    input_available_event (NULL)
   {
     pc.file_attributes (FILE_ATTRIBUTE_NORMAL);
   }
@@ -2089,26 +2097,50 @@ class fhandler_pty_common: public fhandler_termios
     return fh;
   }
 
+  bool attach_pcon_in_fork (void)
+  {
+    return get_ttyp ()->attach_pcon_in_fork;
+  }
+  DWORD get_helper_process_id (void)
+  {
+    return get_ttyp ()->helper_process_id;
+  }
+  HPCON get_pseudo_console (void)
+  {
+    return get_ttyp ()->h_pseudo_console;
+  }
+  bool to_be_read_from_pcon (void);
+
  protected:
-  BOOL process_opost_output (HANDLE h, const void *ptr, ssize_t& len, bool is_echo);
+  BOOL process_opost_output (HANDLE h,
+			     const void *ptr, ssize_t& len, bool is_echo);
 };
 
 class fhandler_pty_slave: public fhandler_pty_common
 {
   HANDLE inuse;			// used to indicate that a tty is in use
-  HANDLE output_handle_cyg;
+  HANDLE output_handle_cyg, io_handle_cyg;
+  DWORD pid_restore;
+  int fd;
 
   /* Helper functions for fchmod and fchown. */
   bool fch_open_handles (bool chown);
   int fch_set_sd (security_descriptor &sd, bool chown);
   void fch_close_handles ();
 
+  bool try_reattach_pcon ();
+  void restore_reattach_pcon ();
+
  public:
   /* Constructor */
   fhandler_pty_slave (int);
+  /* Destructor */
+  ~fhandler_pty_slave ();
 
   void set_output_handle_cyg (HANDLE h) { output_handle_cyg = h; }
   HANDLE& get_output_handle_cyg () { return output_handle_cyg; }
+  void set_handle_cyg (HANDLE h) { io_handle_cyg = h; }
+  HANDLE& get_handle_cyg () { return io_handle_cyg; }
 
   int open (int flags, mode_t mode = 0);
   void open_setup (int flags);
@@ -2127,6 +2159,8 @@ class fhandler_pty_slave: public fhandler_pty_common
   void fixup_after_exec ();
 
   select_record *select_read (select_stuff *);
+  select_record *select_write (select_stuff *);
+  select_record *select_except (select_stuff *);
   virtual char const *ttyname () { return pc.dev.name (); }
   int __reg2 fstat (struct stat *buf);
   int __reg3 facl (int, int, struct acl *);
@@ -2149,6 +2183,23 @@ class fhandler_pty_slave: public fhandler_pty_common
     copyto (fh);
     return fh;
   }
+  void set_switch_to_pcon (int fd);
+  void reset_switch_to_pcon (void);
+  void push_to_pcon_screenbuffer (const char *ptr, size_t len);
+  void mask_switch_to_pcon_in (bool mask)
+  {
+    if (!mask && get_ttyp ()->pcon_pid &&
+	get_ttyp ()->pcon_pid != myself->pid &&
+	kill (get_ttyp ()->pcon_pid, 0) == 0)
+      return;
+    get_ttyp ()->mask_switch_to_pcon_in = mask;
+  }
+  void fixup_after_attach (bool native_maybe, int fd);
+  bool is_line_input (void)
+  {
+    return get_ttyp ()->ti.c_lflag & ICANON;
+  }
+  void setup_locale (void);
 };
 
 #define __ptsname(buf, unit) __small_sprintf ((buf), "/dev/pty%d", (unit))
@@ -2157,17 +2208,17 @@ class fhandler_pty_master: public fhandler_pty_common
   int pktmode;			// non-zero if pty in a packet mode.
   HANDLE master_ctl;		// Control socket for handle duplication
   cygthread *master_thread;	// Master control thread
-  HANDLE from_master, to_master;
+  HANDLE from_master, to_master, from_slave, to_slave;
   HANDLE echo_r, echo_w;
   DWORD dwProcessId;		// Owner of master handles
-  HANDLE io_handle_cyg, to_master_cyg;
+  HANDLE to_master_cyg, from_master_cyg;
   cygthread *master_fwd_thread;	// Master forwarding thread
 
 public:
   HANDLE get_echo_handle () const { return echo_r; }
-  HANDLE& get_handle_cyg () { return io_handle_cyg; }
   /* Constructor */
   fhandler_pty_master (int);
+  ~fhandler_pty_master ();
 
   DWORD pty_master_thread ();
   DWORD pty_master_fwd_thread ();
@@ -2212,6 +2263,8 @@ public:
     copyto (fh);
     return fh;
   }
+
+  bool setup_pseudoconsole (void);
 };
 
 class fhandler_dev_null: public fhandler_base

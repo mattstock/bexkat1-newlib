@@ -282,6 +282,13 @@
 #endif
 	ldr	r0, .LC0	/*  Point at values read.  */
 
+	/* Set __heap_limit.  */
+	ldr     r1, [r0, #4]
+	cmp     r1, #0
+	beq     .LC33
+	ldr     r2, =__heap_limit
+	str     r1, [r2]
+.LC33:
 	ldr     r1, [r0, #0]
 	cmp     r1, #0
 	bne     .LC32
@@ -393,13 +400,14 @@ __change_mode:
 	movs	r1, r0
 #else
 	movs	r0, #AngelSWI_Reason_GetCmdLine
-	adr	r1, .LC30	/* Space for command line.  */
+	ldr	r1, .LC30	/* Space for command line.  */
 #ifdef THUMB_VXM
 	bkpt	AngelSWI
 #else
  	AngelSWIAsm	AngelSWI
 #endif
 	ldr	r1, .LC30
+	ldr	r1, [r1]
 #endif
 	/*  Parse string at r1.  */
 	movs	r0, #0		/* Count of arguments so far.  */
@@ -510,8 +518,17 @@ __change_mode:
 	   for _fini to be called at program exit.  */
 	movs	r4, r0
 	movs	r5, r1
+#ifdef _LITE_EXIT
+	/* Make reference to atexit weak to avoid unconditionally pulling in
+	   support code.  Refer to comments in __atexit.c for more details.  */
+	.weak	FUNCTION(atexit)
+	ldr	r0, .Latexit
+	cmp	r0, #0
+	beq	.Lweak_atexit
+#endif
 	ldr	r0, .Lfini
 	bl	FUNCTION (atexit)
+.Lweak_atexit:
 	bl	FUNCTION (_init)
 	movs	r0, r4
 	movs	r1, r5
@@ -581,13 +598,19 @@ change_back:
 .LC2:
 	.word	__bss_end__
 #ifdef __USES_INITFINI__
+#ifdef _LITE_EXIT
+.Latexit:
+	.word	FUNCTION(atexit)
+
+	/* Weak reference _fini in case of lite exit.  */
+	.weak	FUNCTION(_fini)
+#endif
 .Lfini:
 	.word	FUNCTION(_fini)
 #endif
 #ifdef ARM_RDI_MONITOR
 .LC30:
-	.word	CommandLine
-	.word	255
+	.word	AngelSWIArgs
 .LC31:
 	.word	__end__
 
@@ -600,6 +623,9 @@ HeapLimit:	.word	0
 __stack_base__:	.word	0
 StackLimit:	.word	0
 CommandLine:	.space	256,0	/*  Maximum length of 255 chars handled.  */
+AngelSWIArgs:
+	.word	CommandLine
+	.word	255
 #endif
 	
 #ifdef __pe__

@@ -56,6 +56,7 @@ details. */
 #define srBottom ((con.scroll_region.Bottom < 0) ? \
 		  con.b.srWindow.Bottom : \
 		  con.b.srWindow.Top + con.scroll_region.Bottom)
+#define con_is_legacy (shared_console_info && con.is_legacy)
 
 const unsigned fhandler_console::MAX_WRITE_CHARS = 16384;
 
@@ -168,8 +169,12 @@ fhandler_console::set_unit ()
       if (created)
 	con.owner = getpid ();
     }
-  if (!created && shared_console_info && kill (con.owner, 0) == -1)
-    con.owner = getpid ();
+  if (!created && shared_console_info)
+    {
+      pinfo p (con.owner);
+      if (!p)
+	con.owner = getpid ();
+    }
 
   dev ().parse (devset);
   if (devset != FH_ERROR)
@@ -304,12 +309,34 @@ void
 fhandler_console::set_cursor_maybe ()
 {
   con.fillin (get_output_handle ());
+  /* Nothing to do for xterm compatible mode. */
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
+    return;
   if (con.dwLastCursorPosition.X != con.b.dwCursorPosition.X ||
       con.dwLastCursorPosition.Y != con.b.dwCursorPosition.Y)
     {
       SetConsoleCursorPosition (get_output_handle (), con.b.dwCursorPosition);
       con.dwLastCursorPosition = con.b.dwCursorPosition;
     }
+}
+
+/* Workaround for a bug of windows xterm compatible mode. */
+/* The horizontal tab positions are broken after resize. */
+static void
+fix_tab_position (HANDLE h, SHORT width)
+{
+  char buf[2048] = {0,};
+  /* Save cursor position */
+  __small_sprintf (buf+strlen (buf), "\0337");
+  /* Clear all horizontal tabs */
+  __small_sprintf (buf+strlen (buf), "\033[3g");
+  /* Set horizontal tabs */
+  for (int col=8; col<width; col+=8)
+    __small_sprintf (buf+strlen (buf), "\033[%d;%dH\033H", 1, col+1);
+  /* Restore cursor position */
+  __small_sprintf (buf+strlen (buf), "\0338");
+  DWORD dwLen;
+  WriteConsole (h, buf, strlen (buf), &dwLen, 0);
 }
 
 bool
@@ -323,6 +350,8 @@ fhandler_console::send_winch_maybe ()
     {
       con.scroll_region.Top = 0;
       con.scroll_region.Bottom = -1;
+      if (wincap.has_con_24bit_colors () && !con_is_legacy)
+	fix_tab_position (get_output_handle (), con.dwWinSize.X);
       get_ttyp ()->kill_pgrp (SIGWINCH);
       return true;
     }
@@ -455,7 +484,7 @@ sig_exit:
 fhandler_console::input_states
 fhandler_console::process_input_message (void)
 {
-  if (wincap.has_con_24bit_colors ())
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
     {
       DWORD dwMode;
       /* Enable xterm compatible mode in input */
@@ -471,354 +500,376 @@ fhandler_console::process_input_message (void)
 
   termios *ti = &(get_ttyp ()->ti);
 
-  DWORD nread;
-  INPUT_RECORD input_rec;
-  const char *toadd = NULL;
+  fhandler_console::input_states stat = input_processing;
+  DWORD total_read, i;
+  INPUT_RECORD input_rec[INREC_SIZE];
 
-  if (!ReadConsoleInputW (get_handle (), &input_rec, 1, &nread))
+  if (!PeekConsoleInputW (get_handle (), input_rec, INREC_SIZE, &total_read))
     {
-      termios_printf ("ReadConsoleInput failed, %E");
+      termios_printf ("PeekConsoleInput failed, %E");
       return input_error;
     }
 
-  const WCHAR &unicode_char = input_rec.Event.KeyEvent.uChar.UnicodeChar;
-  const DWORD &ctrl_key_state = input_rec.Event.KeyEvent.dwControlKeyState;
-
-  /* check the event that occurred */
-  switch (input_rec.EventType)
+  for (i = 0; i < total_read; i ++)
     {
-    case KEY_EVENT:
+      DWORD nread = 1;
+      const char *toadd = NULL;
 
-      con.nModifiers = 0;
+      const WCHAR &unicode_char =
+	input_rec[i].Event.KeyEvent.uChar.UnicodeChar;
+      const DWORD &ctrl_key_state =
+	input_rec[i].Event.KeyEvent.dwControlKeyState;
+
+      /* check the event that occurred */
+      switch (input_rec[i].EventType)
+	{
+	case KEY_EVENT:
+
+	  con.nModifiers = 0;
 
 #ifdef DEBUGGING
-      /* allow manual switching to/from raw mode via ctrl-alt-scrolllock */
-      if (input_rec.Event.KeyEvent.bKeyDown
-	  && input_rec.Event.KeyEvent.wVirtualKeyCode == VK_SCROLL
-	  && (ctrl_key_state & (LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED))
-	  == (LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED))
-	{
-	  set_raw_win32_keyboard_mode (!con.raw_win32_keyboard_mode);
-	  return input_processing;
-	}
+	  /* allow manual switching to/from raw mode via ctrl-alt-scrolllock */
+	  if (input_rec[i].Event.KeyEvent.bKeyDown
+	      && input_rec[i].Event.KeyEvent.wVirtualKeyCode == VK_SCROLL
+	      && (ctrl_key_state & (LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED))
+	      == (LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED))
+	    {
+	      set_raw_win32_keyboard_mode (!con.raw_win32_keyboard_mode);
+	      continue;
+	    }
 #endif
 
-      if (con.raw_win32_keyboard_mode)
-	{
-	  __small_sprintf (tmp, "\033{%u;%u;%u;%u;%u;%luK",
-			   input_rec.Event.KeyEvent.bKeyDown,
-			   input_rec.Event.KeyEvent.wRepeatCount,
-			   input_rec.Event.KeyEvent.wVirtualKeyCode,
-			   input_rec.Event.KeyEvent.wVirtualScanCode,
-			   input_rec.Event.KeyEvent.uChar.UnicodeChar,
-			   input_rec.Event.KeyEvent.dwControlKeyState);
-	  toadd = tmp;
-	  nread = strlen (toadd);
+	  if (con.raw_win32_keyboard_mode)
+	    {
+	      __small_sprintf (tmp, "\033{%u;%u;%u;%u;%u;%luK",
+			       input_rec[i].Event.KeyEvent.bKeyDown,
+			       input_rec[i].Event.KeyEvent.wRepeatCount,
+			       input_rec[i].Event.KeyEvent.wVirtualKeyCode,
+			       input_rec[i].Event.KeyEvent.wVirtualScanCode,
+			       input_rec[i].Event.KeyEvent.uChar.UnicodeChar,
+			       input_rec[i].Event.KeyEvent.dwControlKeyState);
+	      toadd = tmp;
+	      nread = strlen (toadd);
+	      break;
+	    }
+
+	  /* Ignore key up events, except for Alt+Numpad events. */
+	  if (!input_rec[i].Event.KeyEvent.bKeyDown &&
+	      !is_alt_numpad_event (&input_rec[i]))
+	    continue;
+	  /* Ignore Alt+Numpad keys.  They are eventually handled below after
+	     releasing the Alt key. */
+	  if (input_rec[i].Event.KeyEvent.bKeyDown
+	      && is_alt_numpad_key (&input_rec[i]))
+	    continue;
+
+	  if (ctrl_key_state & SHIFT_PRESSED)
+	    con.nModifiers |= 1;
+	  if (ctrl_key_state & RIGHT_ALT_PRESSED)
+	    con.nModifiers |= 2;
+	  if (ctrl_key_state & CTRL_PRESSED)
+	    con.nModifiers |= 4;
+	  if (ctrl_key_state & LEFT_ALT_PRESSED)
+	    con.nModifiers |= 8;
+
+	  /* Allow Backspace to emit ^? and escape sequences. */
+	  if (input_rec[i].Event.KeyEvent.wVirtualKeyCode == VK_BACK)
+	    {
+	      char c = con.backspace_keycode;
+	      nread = 0;
+	      if (ctrl_key_state & ALT_PRESSED)
+		{
+		  if (con.metabit)
+		    c |= 0x80;
+		  else
+		    tmp[nread++] = '\e';
+		}
+	      tmp[nread++] = c;
+	      tmp[nread] = 0;
+	      toadd = tmp;
+	    }
+	  /* Allow Ctrl-Space to emit ^@ */
+	  else if (input_rec[i].Event.KeyEvent.wVirtualKeyCode
+		   == ((wincap.has_con_24bit_colors () && !con_is_legacy) ?
+		       '2' : VK_SPACE)
+		   && (ctrl_key_state & CTRL_PRESSED)
+		   && !(ctrl_key_state & ALT_PRESSED))
+	    toadd = "";
+	  else if (unicode_char == 0
+		   /* arrow/function keys */
+		   || (input_rec[i].Event.KeyEvent.dwControlKeyState
+		       & ENHANCED_KEY))
+	    {
+	      toadd = get_nonascii_key (input_rec[i], tmp);
+	      if (!toadd)
+		{
+		  con.nModifiers = 0;
+		  continue;
+		}
+	      nread = strlen (toadd);
+	    }
+	  else
+	    {
+	      nread = con.con_to_str (tmp + 1, 59, unicode_char);
+	      /* Determine if the keystroke is modified by META.  The tricky
+		 part is to distinguish whether the right Alt key should be
+		 recognized as Alt, or as AltGr. */
+	      bool meta =
+		/* Alt but not AltGr (= left ctrl + right alt)? */
+		(ctrl_key_state & ALT_PRESSED) != 0
+		&& ((ctrl_key_state & CTRL_PRESSED) == 0
+		    /* but also allow Alt-AltGr: */
+		    || (ctrl_key_state & ALT_PRESSED) == ALT_PRESSED
+		    || (unicode_char <= 0x1f || unicode_char == 0x7f));
+	      if (!meta)
+		{
+		  /* Determine if the character is in the current multibyte
+		     charset.  The test is easy.  If the multibyte sequence
+		     is > 1 and the first byte is ASCII CAN, the character
+		     has been translated into the ASCII CAN + UTF-8 replacement
+		     sequence.  If so, just ignore the keypress.
+		     FIXME: Is there a better solution? */
+		  if (nread > 1 && tmp[1] == 0x18)
+		    beep ();
+		  else
+		    toadd = tmp + 1;
+		}
+	      else if (con.metabit)
+		{
+		  tmp[1] |= 0x80;
+		  toadd = tmp + 1;
+		}
+	      else
+		{
+		  tmp[0] = '\033';
+		  tmp[1] = cyg_tolower (tmp[1]);
+		  toadd = tmp;
+		  nread++;
+		  con.nModifiers &= ~4;
+		}
+	    }
 	  break;
-	}
 
-      /* Ignore key up events, except for Alt+Numpad events. */
-      if (!input_rec.Event.KeyEvent.bKeyDown &&
-	  !is_alt_numpad_event (&input_rec))
-	return input_processing;
-      /* Ignore Alt+Numpad keys.  They are eventually handled below after
-	 releasing the Alt key. */
-      if (input_rec.Event.KeyEvent.bKeyDown
-	  && is_alt_numpad_key (&input_rec))
-	return input_processing;
-
-      if (ctrl_key_state & SHIFT_PRESSED)
-	con.nModifiers |= 1;
-      if (ctrl_key_state & RIGHT_ALT_PRESSED)
-	con.nModifiers |= 2;
-      if (ctrl_key_state & CTRL_PRESSED)
-	con.nModifiers |= 4;
-      if (ctrl_key_state & LEFT_ALT_PRESSED)
-	con.nModifiers |= 8;
-
-      /* Allow Backspace to emit ^? and escape sequences. */
-      if (input_rec.Event.KeyEvent.wVirtualKeyCode == VK_BACK)
-	{
-	  char c = con.backspace_keycode;
-	  nread = 0;
-	  if (ctrl_key_state & ALT_PRESSED)
+	case MOUSE_EVENT:
+	  send_winch_maybe ();
 	    {
-	      if (con.metabit)
-		c |= 0x80;
-	      else
-		tmp[nread++] = '\e';
-	    }
-	  tmp[nread++] = c;
-	  tmp[nread] = 0;
-	  toadd = tmp;
-	}
-      /* Allow Ctrl-Space to emit ^@ */
-      else if (input_rec.Event.KeyEvent.wVirtualKeyCode
-	       == (wincap.has_con_24bit_colors () ? '2' : VK_SPACE)
-	       && (ctrl_key_state & CTRL_PRESSED)
-	       && !(ctrl_key_state & ALT_PRESSED))
-	toadd = "";
-      else if (unicode_char == 0
-	       /* arrow/function keys */
-	       || (input_rec.Event.KeyEvent.dwControlKeyState & ENHANCED_KEY))
-	{
-	  toadd = get_nonascii_key (input_rec, tmp);
-	  if (!toadd)
-	    {
-	      con.nModifiers = 0;
-	      return input_processing;
-	    }
-	  nread = strlen (toadd);
-	}
-      else
-	{
-	  nread = con.con_to_str (tmp + 1, 59, unicode_char);
-	  /* Determine if the keystroke is modified by META.  The tricky
-	     part is to distinguish whether the right Alt key should be
-	     recognized as Alt, or as AltGr. */
-	  bool meta =
-	    /* Alt but not AltGr (= left ctrl + right alt)? */
-	    (ctrl_key_state & ALT_PRESSED) != 0
-	    && ((ctrl_key_state & CTRL_PRESSED) == 0
-		/* but also allow Alt-AltGr: */
-		|| (ctrl_key_state & ALT_PRESSED) == ALT_PRESSED
-		|| (unicode_char <= 0x1f || unicode_char == 0x7f));
-	  if (!meta)
-	    {
-	      /* Determine if the character is in the current multibyte
-		 charset.  The test is easy.  If the multibyte sequence
-		 is > 1 and the first byte is ASCII CAN, the character
-		 has been translated into the ASCII CAN + UTF-8 replacement
-		 sequence.  If so, just ignore the keypress.
-		 FIXME: Is there a better solution? */
-	      if (nread > 1 && tmp[1] == 0x18)
-		beep ();
-	      else
-		toadd = tmp + 1;
-	    }
-	  else if (con.metabit)
-	    {
-	      tmp[1] |= 0x80;
-	      toadd = tmp + 1;
-	    }
-	  else
-	    {
-	      tmp[0] = '\033';
-	      tmp[1] = cyg_tolower (tmp[1]);
-	      toadd = tmp;
-	      nread++;
-	      con.nModifiers &= ~4;
-	    }
-	}
-      break;
-
-    case MOUSE_EVENT:
-      send_winch_maybe ();
-	{
-	  MOUSE_EVENT_RECORD& mouse_event = input_rec.Event.MouseEvent;
-	  /* As a unique guard for mouse report generation,
-	     call mouse_aware() which is common with select(), so the result
-	     of select() and the actual read() will be consistent on the
-	     issue of whether input (i.e. a mouse escape sequence) will
-	     be available or not */
-	  if (mouse_aware (mouse_event))
-	    {
-	      /* Note: Reported mouse position was already retrieved by
-		 mouse_aware() and adjusted by window scroll buffer offset */
-
-	      /* Treat the double-click event like a regular button press */
-	      if (mouse_event.dwEventFlags == DOUBLE_CLICK)
+	      MOUSE_EVENT_RECORD& mouse_event = input_rec[i].Event.MouseEvent;
+	      /* As a unique guard for mouse report generation,
+		 call mouse_aware() which is common with select(), so the result
+		 of select() and the actual read() will be consistent on the
+		 issue of whether input (i.e. a mouse escape sequence) will
+		 be available or not */
+	      if (mouse_aware (mouse_event))
 		{
-		  syscall_printf ("mouse: double-click -> click");
-		  mouse_event.dwEventFlags = 0;
-		}
+		  /* Note: Reported mouse position was already retrieved by
+		     mouse_aware() and adjusted by window scroll buffer offset */
 
-	      /* This code assumes Windows never reports multiple button
-		 events at the same time. */
-	      int b = 0;
-	      char sz[32];
-	      char mode6_term = 'M';
-
-	      if (mouse_event.dwEventFlags == MOUSE_WHEELED)
-		{
-		  if (mouse_event.dwButtonState & 0xFF800000)
+		  /* Treat the double-click event like a regular button press */
+		  if (mouse_event.dwEventFlags == DOUBLE_CLICK)
 		    {
-		      b = 0x41;
-		      strcpy (sz, "wheel down");
+		      syscall_printf ("mouse: double-click -> click");
+		      mouse_event.dwEventFlags = 0;
+		    }
+
+		  /* This code assumes Windows never reports multiple button
+		     events at the same time. */
+		  int b = 0;
+		  char sz[32];
+		  char mode6_term = 'M';
+
+		  if (mouse_event.dwEventFlags == MOUSE_WHEELED)
+		    {
+		      if (mouse_event.dwButtonState & 0xFF800000)
+			{
+			  b = 0x41;
+			  strcpy (sz, "wheel down");
+			}
+		      else
+			{
+			  b = 0x40;
+			  strcpy (sz, "wheel up");
+			}
 		    }
 		  else
 		    {
-		      b = 0x40;
-		      strcpy (sz, "wheel up");
+		      /* Ignore unimportant mouse buttons */
+		      mouse_event.dwButtonState &= 0x7;
+
+		      if (mouse_event.dwEventFlags == MOUSE_MOVED)
+			{
+			  b = con.last_button_code;
+			}
+		      else if (mouse_event.dwButtonState < con.dwLastButtonState
+			       && !con.ext_mouse_mode6)
+			{
+			  b = 3;
+			  strcpy (sz, "btn up");
+			}
+		      else if ((mouse_event.dwButtonState & 1)
+			       != (con.dwLastButtonState & 1))
+			{
+			  b = 0;
+			  strcpy (sz, "btn1 down");
+			}
+		      else if ((mouse_event.dwButtonState & 2)
+			       != (con.dwLastButtonState & 2))
+			{
+			  b = 2;
+			  strcpy (sz, "btn2 down");
+			}
+		      else if ((mouse_event.dwButtonState & 4)
+			       != (con.dwLastButtonState & 4))
+			{
+			  b = 1;
+			  strcpy (sz, "btn3 down");
+			}
+
+		      if (con.ext_mouse_mode6 /* distinguish release */
+			  && mouse_event.dwButtonState < con.dwLastButtonState)
+			mode6_term = 'm';
+
+		      con.last_button_code = b;
+
+		      if (mouse_event.dwEventFlags == MOUSE_MOVED)
+			{
+			  b += 32;
+			  strcpy (sz, "move");
+			}
+		      else
+			{
+			  /* Remember the modified button state */
+			  con.dwLastButtonState = mouse_event.dwButtonState;
+			}
 		    }
+
+		  /* Remember mouse position */
+		  con.dwLastMousePosition.X = con.dwMousePosition.X;
+		  con.dwLastMousePosition.Y = con.dwMousePosition.Y;
+
+		  /* Remember the modifiers */
+		  con.nModifiers = 0;
+		  if (mouse_event.dwControlKeyState & SHIFT_PRESSED)
+		    con.nModifiers |= 0x4;
+		  if (mouse_event.dwControlKeyState & ALT_PRESSED)
+		    con.nModifiers |= 0x8;
+		  if (mouse_event.dwControlKeyState & CTRL_PRESSED)
+		    con.nModifiers |= 0x10;
+
+		  /* Indicate the modifiers */
+		  b |= con.nModifiers;
+
+		  /* We can now create the code. */
+		  if (con.ext_mouse_mode6)
+		    {
+		      __small_sprintf (tmp, "\033[<%d;%d;%d%c", b,
+				       con.dwMousePosition.X + 1,
+				       con.dwMousePosition.Y + 1,
+				       mode6_term);
+		      nread = strlen (tmp);
+		    }
+		  else if (con.ext_mouse_mode15)
+		    {
+		      __small_sprintf (tmp, "\033[%d;%d;%dM", b + 32,
+				       con.dwMousePosition.X + 1,
+				       con.dwMousePosition.Y + 1);
+		      nread = strlen (tmp);
+		    }
+		  else if (con.ext_mouse_mode5)
+		    {
+		      unsigned int xcode = con.dwMousePosition.X + ' ' + 1;
+		      unsigned int ycode = con.dwMousePosition.Y + ' ' + 1;
+
+		      __small_sprintf (tmp, "\033[M%c", b + ' ');
+		      nread = 4;
+		      /* the neat nested encoding function of mintty
+			 does not compile in g++, so let's unfold it: */
+		      if (xcode < 0x80)
+			tmp [nread++] = xcode;
+		      else if (xcode < 0x800)
+			{
+			  tmp [nread++] = 0xC0 + (xcode >> 6);
+			  tmp [nread++] = 0x80 + (xcode & 0x3F);
+			}
+		      else
+			tmp [nread++] = 0;
+		      if (ycode < 0x80)
+			tmp [nread++] = ycode;
+		      else if (ycode < 0x800)
+			{
+			  tmp [nread++] = 0xC0 + (ycode >> 6);
+			  tmp [nread++] = 0x80 + (ycode & 0x3F);
+			}
+		      else
+			tmp [nread++] = 0;
+		    }
+		  else
+		    {
+		      unsigned int xcode = con.dwMousePosition.X + ' ' + 1;
+		      unsigned int ycode = con.dwMousePosition.Y + ' ' + 1;
+		      if (xcode >= 256)
+			xcode = 0;
+		      if (ycode >= 256)
+			ycode = 0;
+		      __small_sprintf (tmp, "\033[M%c%c%c", b + ' ',
+				       xcode, ycode);
+		      nread = 6;	/* tmp may contain NUL bytes */
+		    }
+		  syscall_printf ("mouse: %s at (%d,%d)", sz,
+				  con.dwMousePosition.X,
+				  con.dwMousePosition.Y);
+
+		  toadd = tmp;
 		}
+	    }
+	  break;
+
+	case FOCUS_EVENT:
+	  if (con.use_focus)
+	    {
+	      if (input_rec[i].Event.FocusEvent.bSetFocus)
+		__small_sprintf (tmp, "\033[I");
 	      else
-		{
-		  /* Ignore unimportant mouse buttons */
-		  mouse_event.dwButtonState &= 0x7;
-
-		  if (mouse_event.dwEventFlags == MOUSE_MOVED)
-		    {
-		      b = con.last_button_code;
-		    }
-		  else if (mouse_event.dwButtonState < con.dwLastButtonState
-			   && !con.ext_mouse_mode6)
-		    {
-		      b = 3;
-		      strcpy (sz, "btn up");
-		    }
-		  else if ((mouse_event.dwButtonState & 1)
-			   != (con.dwLastButtonState & 1))
-		    {
-		      b = 0;
-		      strcpy (sz, "btn1 down");
-		    }
-		  else if ((mouse_event.dwButtonState & 2)
-			   != (con.dwLastButtonState & 2))
-		    {
-		      b = 2;
-		      strcpy (sz, "btn2 down");
-		    }
-		  else if ((mouse_event.dwButtonState & 4)
-			   != (con.dwLastButtonState & 4))
-		    {
-		      b = 1;
-		      strcpy (sz, "btn3 down");
-		    }
-
-		  if (con.ext_mouse_mode6 /* distinguish release */
-		      && mouse_event.dwButtonState < con.dwLastButtonState)
-		    mode6_term = 'm';
-
-		  con.last_button_code = b;
-
-		  if (mouse_event.dwEventFlags == MOUSE_MOVED)
-		    {
-		      b += 32;
-		      strcpy (sz, "move");
-		    }
-		  else
-		    {
-		      /* Remember the modified button state */
-		      con.dwLastButtonState = mouse_event.dwButtonState;
-		    }
-		}
-
-	      /* Remember mouse position */
-	      con.dwLastMousePosition.X = con.dwMousePosition.X;
-	      con.dwLastMousePosition.Y = con.dwMousePosition.Y;
-
-	      /* Remember the modifiers */
-	      con.nModifiers = 0;
-	      if (mouse_event.dwControlKeyState & SHIFT_PRESSED)
-		con.nModifiers |= 0x4;
-	      if (mouse_event.dwControlKeyState & ALT_PRESSED)
-		con.nModifiers |= 0x8;
-	      if (mouse_event.dwControlKeyState & CTRL_PRESSED)
-		con.nModifiers |= 0x10;
-
-	      /* Indicate the modifiers */
-	      b |= con.nModifiers;
-
-	      /* We can now create the code. */
-	      if (con.ext_mouse_mode6)
-		{
-		  __small_sprintf (tmp, "\033[<%d;%d;%d%c", b,
-				   con.dwMousePosition.X + 1,
-				   con.dwMousePosition.Y + 1,
-				   mode6_term);
-		  nread = strlen (tmp);
-		}
-	      else if (con.ext_mouse_mode15)
-		{
-		  __small_sprintf (tmp, "\033[%d;%d;%dM", b + 32,
-				   con.dwMousePosition.X + 1,
-				   con.dwMousePosition.Y + 1);
-		  nread = strlen (tmp);
-		}
-	      else if (con.ext_mouse_mode5)
-		{
-		  unsigned int xcode = con.dwMousePosition.X + ' ' + 1;
-		  unsigned int ycode = con.dwMousePosition.Y + ' ' + 1;
-
-		  __small_sprintf (tmp, "\033[M%c", b + ' ');
-		  nread = 4;
-		  /* the neat nested encoding function of mintty
-		     does not compile in g++, so let's unfold it: */
-		  if (xcode < 0x80)
-		    tmp [nread++] = xcode;
-		  else if (xcode < 0x800)
-		    {
-		      tmp [nread++] = 0xC0 + (xcode >> 6);
-		      tmp [nread++] = 0x80 + (xcode & 0x3F);
-		    }
-		  else
-		    tmp [nread++] = 0;
-		  if (ycode < 0x80)
-		    tmp [nread++] = ycode;
-		  else if (ycode < 0x800)
-		    {
-		      tmp [nread++] = 0xC0 + (ycode >> 6);
-		      tmp [nread++] = 0x80 + (ycode & 0x3F);
-		    }
-		  else
-		    tmp [nread++] = 0;
-		}
-	      else
-		{
-		  unsigned int xcode = con.dwMousePosition.X + ' ' + 1;
-		  unsigned int ycode = con.dwMousePosition.Y + ' ' + 1;
-		  if (xcode >= 256)
-		    xcode = 0;
-		  if (ycode >= 256)
-		    ycode = 0;
-		  __small_sprintf (tmp, "\033[M%c%c%c", b + ' ',
-				   xcode, ycode);
-		  nread = 6;	/* tmp may contain NUL bytes */
-		}
-	      syscall_printf ("mouse: %s at (%d,%d)", sz,
-			      con.dwMousePosition.X,
-			      con.dwMousePosition.Y);
+		__small_sprintf (tmp, "\033[O");
 
 	      toadd = tmp;
+	      nread = 3;
+	    }
+	  break;
+
+	case WINDOW_BUFFER_SIZE_EVENT:
+	  if (send_winch_maybe ())
+	    {
+	      stat = input_winch;
+	      goto out;
+	    }
+	  /* fall through */
+	default:
+	  continue;
+	}
+
+      if (toadd)
+	{
+	  ssize_t ret;
+	  line_edit_status res = line_edit (toadd, nread, *ti, &ret);
+	  if (res == line_edit_signalled)
+	    {
+	      stat = input_signalled;
+	      goto out;
+	    }
+	  else if (res == line_edit_input_done)
+	    {
+	      input_ready = true;
+	      stat = input_ok;
+	      if (ti->c_lflag & ICANON)
+		goto out;
 	    }
 	}
-      break;
-
-    case FOCUS_EVENT:
-      if (con.use_focus)
-	{
-	  if (input_rec.Event.FocusEvent.bSetFocus)
-	    __small_sprintf (tmp, "\033[I");
-	  else
-	    __small_sprintf (tmp, "\033[O");
-
-	  toadd = tmp;
-	  nread = 3;
-	}
-      break;
-
-    case WINDOW_BUFFER_SIZE_EVENT:
-      if (send_winch_maybe ())
-	return input_winch;
-      /* fall through */
-    default:
-      return input_processing;
     }
-
-  if (toadd)
-    {
-      ssize_t ret;
-      line_edit_status res = line_edit (toadd, nread, *ti, &ret);
-      if (res == line_edit_signalled)
-	return input_signalled;
-      else if (res == line_edit_input_done)
-	{
-	  input_ready = true;
-	  return input_ok;
-	}
-    }
-  return input_processing;
+out:
+  /* Discard processed recored. */
+  DWORD dummy;
+  ReadConsoleInputW (get_handle (), input_rec, min (total_read, i+1), &dummy);
+  return stat;
 }
 
 void
@@ -974,17 +1025,28 @@ fhandler_console::open (int flags, mode_t)
       /* Enable xterm compatible mode in output */
       GetConsoleMode (get_output_handle (), &dwMode);
       dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-      SetConsoleMode (get_output_handle (), dwMode);
+      if (!SetConsoleMode (get_output_handle (), dwMode))
+	con.is_legacy = true;
+      else
+	con.is_legacy = false;
       /* Enable xterm compatible mode in input */
-      GetConsoleMode (get_handle (), &dwMode);
-      dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-      SetConsoleMode (get_handle (), dwMode);
+      if (!con_is_legacy)
+	{
+	  GetConsoleMode (get_handle (), &dwMode);
+	  dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+	  if (!SetConsoleMode (get_handle (), dwMode))
+	    con.is_legacy = true;
+	}
+      extern int sawTERM;
+      if (con_is_legacy && !sawTERM)
+	setenv ("TERM", "cygwin", 1);
     }
 
   DWORD cflags;
   if (GetConsoleMode (get_handle (), &cflags))
     SetConsoleMode (get_handle (), ENABLE_WINDOW_INPUT
-		    | (wincap.has_con_24bit_colors () ? 0 : ENABLE_MOUSE_INPUT)
+		    | ((wincap.has_con_24bit_colors () && !con_is_legacy) ?
+		       0 : ENABLE_MOUSE_INPUT)
 		    | cflags);
 
   debug_printf ("opened conin$ %p, conout$ %p", get_handle (),
@@ -1013,7 +1075,7 @@ fhandler_console::close ()
   output_mutex = NULL;
 
   if (shared_console_info && getpid () == con.owner &&
-      wincap.has_con_24bit_colors ())
+      wincap.has_con_24bit_colors () && !con_is_legacy)
     {
       DWORD dwMode;
       /* Disable xterm compatible mode in input */
@@ -1028,6 +1090,19 @@ fhandler_console::close ()
 
   CloseHandle (get_handle ());
   CloseHandle (get_output_handle ());
+
+  /* If already attached to pseudo console, don't call free_console () */
+  cygheap_fdenum cfd (false);
+  while (cfd.next () >= 0)
+    if (cfd->get_major () == DEV_PTYM_MAJOR ||
+	cfd->get_major () == DEV_PTYS_MAJOR)
+      {
+	fhandler_pty_common *t =
+	  (fhandler_pty_common *) (fhandler_base *) cfd;
+	if (get_console_process_id (t->get_helper_process_id (), true))
+	  return 0;
+      }
+
   if (!have_execed)
     free_console ();
   return 0;
@@ -1100,9 +1175,6 @@ fhandler_console::ioctl (unsigned int cmd, void *arg)
 	return -1;
       case FIONREAD:
 	{
-	  /* Per MSDN, max size of buffer required is below 64K. */
-#define	  INREC_SIZE	(65536 / sizeof (INPUT_RECORD))
-
 	  DWORD n;
 	  int ret = 0;
 	  INPUT_RECORD inp[INREC_SIZE];
@@ -1150,7 +1222,7 @@ fhandler_console::output_tcsetattr (int, struct termios const *t)
   acquire_output_mutex (INFINITE);
   DWORD flags = ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT;
   /* If system has 24 bit color capability, use xterm compatible mode. */
-  if (wincap.has_con_24bit_colors ())
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
     {
       flags |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
       if (!(t->c_oflag & OPOST) || !(t->c_oflag & ONLCR))
@@ -1215,9 +1287,10 @@ fhandler_console::input_tcsetattr (int, struct termios const *t)
     }
 
   flags |= ENABLE_WINDOW_INPUT |
-    (wincap.has_con_24bit_colors () ? 0 : ENABLE_MOUSE_INPUT);
+    ((wincap.has_con_24bit_colors () && !con_is_legacy) ?
+     0 : ENABLE_MOUSE_INPUT);
   /* if system has 24 bit color capability, use xterm compatible mode. */
-  if (wincap.has_con_24bit_colors ())
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
     flags |= ENABLE_VIRTUAL_TERMINAL_INPUT;
 
   int res;
@@ -1589,6 +1662,12 @@ static const wchar_t __vt100_conv[31] = {
 inline
 bool fhandler_console::write_console (PWCHAR buf, DWORD len, DWORD& done)
 {
+  bool need_fix_tab_position = false;
+  /* Check if screen will be alternated. */
+  if (wincap.has_con_24bit_colors () && !con_is_legacy
+      && memmem (buf, len*sizeof (WCHAR), L"\033[?1049", 7*sizeof (WCHAR)))
+    need_fix_tab_position = true;
+
   if (con.iso_2022_G1
 	? con.vt100_graphics_mode_G1
 	: con.vt100_graphics_mode_G0)
@@ -1607,6 +1686,9 @@ bool fhandler_console::write_console (PWCHAR buf, DWORD len, DWORD& done)
       len -= done;
       buf += done;
     }
+  /* Call fix_tab_position() if screen has been alternated. */
+  if (need_fix_tab_position)
+    fix_tab_position (get_output_handle (), con.dwWinSize.X);
   return true;
 }
 
@@ -2430,7 +2512,8 @@ fhandler_console::write_normal (const unsigned char *src,
   memset (&ps, 0, sizeof ps);
   while (found < end
 	 && found - src < CONVERT_LIMIT
-	 && (wincap.has_con_24bit_colors () || base_chars[*found] == NOR) )
+	 && ((wincap.has_con_24bit_colors () && !con_is_legacy)
+	     || base_chars[*found] == NOR) )
     {
       switch (ret = f_mbtowc (_REENT, NULL, (const char *) found,
 			       end - found, &ps))
@@ -2890,7 +2973,7 @@ fhandler_console::fixup_after_fork_exec (bool execing)
 {
   set_unit ();
   setup_io_mutex ();
-  if (wincap.has_con_24bit_colors ())
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
     {
       DWORD dwMode;
       /* Disable xterm compatible mode in input */
@@ -2974,20 +3057,22 @@ fhandler_console::create_invisible_console_workaround ()
 	  STARTUPINFOW si = {};
 	  PROCESS_INFORMATION pi;
 	  size_t len = helper.get_wide_win32_path_len ();
-	  WCHAR cmd[len + (2 * strlen (" 0xffffffff")) + 1];
+	  WCHAR cmd[len + 1];
+	  WCHAR args[len + 1 + (2 * sizeof (" 0xffffffffffffffff")) + 1];
 	  WCHAR title[] = L"invisible cygwin console";
 
+	  /* Create a new hidden process.  Use the two event handles as
+	     argv[1] and argv[2]. */
+
 	  helper.get_wide_win32_path (cmd);
-	  __small_swprintf (cmd + len, L" %p %p", hello, goodbye);
+	  __small_swprintf (args, L"\"%W\" %p %p", cmd, hello, goodbye);
 
 	  si.cb = sizeof (si);
 	  si.dwFlags = STARTF_USESHOWWINDOW;
 	  si.wShowWindow = SW_HIDE;
 	  si.lpTitle = title;
 
-	  /* Create a new hidden process.  Use the two event handles as
-	     argv[1] and argv[2]. */
-	  BOOL x = CreateProcessW (NULL, cmd,
+	  BOOL x = CreateProcessW (cmd, args,
 				   &sec_none_nih, &sec_none_nih, true,
 				   CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi);
 	  if (x)
@@ -3080,6 +3165,37 @@ fhandler_console::need_invisible ()
 
   debug_printf ("invisible_console %d", invisible_console);
   return b;
+}
+
+DWORD
+fhandler_console::get_console_process_id (DWORD pid, bool match)
+{
+  DWORD tmp;
+  DWORD num, num_req;
+  num = 1;
+  num_req = GetConsoleProcessList (&tmp, num);
+  DWORD *list;
+  while (true)
+    {
+      list = (DWORD *)
+	HeapAlloc (GetProcessHeap (), 0, num_req * sizeof (DWORD));
+      num = num_req;
+      num_req = GetConsoleProcessList (list, num);
+      if (num_req > num)
+	HeapFree (GetProcessHeap (), 0, list);
+      else
+	break;
+    }
+  num = num_req;
+
+  tmp = 0;
+  for (DWORD i=0; i<num; i++)
+    if ((match && list[i] == pid) || (!match && list[i] != pid))
+      /* Last one is the oldest. */
+      /* https://github.com/microsoft/terminal/issues/95 */
+      tmp = list[i];
+  HeapFree (GetProcessHeap (), 0, list);
+  return tmp;
 }
 
 DWORD
