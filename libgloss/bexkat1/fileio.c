@@ -8,11 +8,9 @@
 #include "glue.h"
 #include "serial.h"
 #include "misc.h"
-#if 0
 #include "ff.h"
 
 extern time_t fat2time(int fatdate, int fattime);
-#endif
 
 typedef struct {
   const char *name;
@@ -48,7 +46,6 @@ int nop_fstat(int fd, struct stat *buf) {
   return (0);
 }
 
-#if 0
 /* for FatFS, keep the various records we need statically */
 static FATFS fatfs_fatfs;
 static FIL fatfs_fils[1];
@@ -242,8 +239,6 @@ int fatfs_mkdir(const char *path, mode_t mode) {
   return -1;
 }
 
-#endif
-
 int serial_read(int fd, char *ptr, int len) {
   int i = 0;
 
@@ -282,20 +277,21 @@ const driver_t driver_serial1 = { "serial1",
 				  nop_fstat,
 				  nop_lseek };
 
-/*const driver_t driver_fatfs = { "fatfs",
+const driver_t driver_fatfs = { "fatfs",
 				fatfs_open,
 				fatfs_close,
 				fatfs_read,
 				fatfs_write,
 				fatfs_fstat,
 				fatfs_lseek };
-*/
+
 
 const driver_t *driver_list[] = {
   &driver_serial0, /* stdin */
   &driver_serial0, /* stdout */
   &driver_serial0, /* stderr */
-  &driver_serial1 /* 3 */
+  &driver_serial1, /* 3 */
+  &driver_fatfs
 };
 
 off_t
@@ -304,7 +300,6 @@ _lseek (int fd, off_t offset, int whence)
   return driver_list[fd]->lseek(fd, offset, whence);
 }
 
-#if 0
 int
 access (const char *path, int mode)
 {
@@ -322,7 +317,6 @@ _stat (const char *path, struct stat *buf)
 {
   return fatfs_stat(path, buf);
 }
-#endif
 
 int
 _fstat (int fd, struct stat *buf)
