@@ -1,7 +1,7 @@
 %rename link_gcc_c_sequence                max10_link_gcc_c_sequence
 
 *max10_libgloss:
--lsupport -lmax10
+-lsupport -lrawsd -lmax10
 
 *max10_libc:
 -lc
