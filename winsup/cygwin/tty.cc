@@ -245,6 +245,11 @@ tty::init ()
   num_pcon_attached_slaves = 0;
   term_code_page = 0;
   need_redraw_screen = false;
+  fwd_done = NULL;
+  pcon_last_time = 0;
+  pcon_in_empty = true;
+  req_transfer_input_to_pcon = false;
+  req_flush_pcon_input = false;
 }
 
 HANDLE

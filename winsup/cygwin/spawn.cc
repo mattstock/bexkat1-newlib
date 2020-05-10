@@ -607,10 +607,18 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 			attach_to_console = true;
 		    }
 		  ptys->fixup_after_attach (!iscygwin (), fd);
+		  if (mode == _P_OVERLAY)
+		    ptys->set_freeconsole_on_close (iscygwin ());
 		}
 	    }
 	  else if (fh && fh->get_major () == DEV_CONS_MAJOR)
-	    attach_to_console = true;
+	    {
+	      attach_to_console = true;
+	      fhandler_console *cons = (fhandler_console *) fh;
+	      if (wincap.has_con_24bit_colors () && !iscygwin ())
+		if (fd == 1 || fd == 2)
+		  cons->request_xterm_mode_output (false);
+	    }
 	}
 
       /* Set up needed handles for stdio */
@@ -790,6 +798,8 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  NtClose (old_winpid_hdl);
 	  real_path.get_wide_win32_path (myself->progname); // FIXME: race?
 	  sigproc_printf ("new process name %W", myself->progname);
+	  if (!iscygwin ())
+	    close_all_files ();
 	}
       else
 	{
@@ -888,8 +898,6 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 		wait_for_myself ();
 	    }
 	  myself.exit (EXITCODE_NOSET);
-	  if (!iscygwin ())
-	    close_all_files ();
 	  break;
 	case _P_WAIT:
 	case _P_SYSTEM:
@@ -926,6 +934,15 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
     {
       FreeConsole ();
       AttachConsole (pid_restore);
+      cygheap_fdenum cfd (false);
+      int fd;
+      while ((fd = cfd.next ()) >= 0)
+	if (cfd->get_major () == DEV_PTYS_MAJOR)
+	  {
+	    fhandler_pty_slave *ptys =
+	      (fhandler_pty_slave *) (fhandler_base *) cfd;
+	    ptys->fixup_after_attach (false, fd);
+	  }
     }
 
   return (int) res;

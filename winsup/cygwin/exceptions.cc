@@ -814,7 +814,7 @@ exception::handle (EXCEPTION_RECORD *e, exception_list *frame, CONTEXT *in,
   /* POSIX requires that for SIGSEGV and SIGBUS, si_addr should be set to the
      address of faulting memory reference.  For SIGILL and SIGFPE these should
      be the address of the faulting instruction.  Other signals are apparently
-     undefined so we just set those to the faulting instruction too.  */ 
+     undefined so we just set those to the faulting instruction too.  */
   si.si_addr = (si.si_signo == SIGSEGV || si.si_signo == SIGBUS)
 	       ? (void *) e->ExceptionInformation[1] : (void *) in->_GR(ip);
   me.incyg++;
@@ -1166,7 +1166,7 @@ extern "C" int
 sighold (int sig)
 {
   /* check that sig is in right range */
-  if (sig < 0 || sig >= NSIG)
+  if (sig < 0 || sig >= _NSIG)
     {
       set_errno (EINVAL);
       syscall_printf ("signal %d out of range", sig);
@@ -1182,7 +1182,7 @@ extern "C" int
 sigrelse (int sig)
 {
   /* check that sig is in right range */
-  if (sig < 0 || sig >= NSIG)
+  if (sig < 0 || sig >= _NSIG)
     {
       set_errno (EINVAL);
       syscall_printf ("signal %d out of range", sig);
@@ -1201,7 +1201,7 @@ sigset (int sig, _sig_func_ptr func)
   _sig_func_ptr prev;
 
   /* check that sig is in right range */
-  if (sig < 0 || sig >= NSIG || sig == SIGKILL || sig == SIGSTOP)
+  if (sig < 0 || sig >= _NSIG || sig == SIGKILL || sig == SIGSTOP)
     {
       set_errno (EINVAL);
       syscall_printf ("SIG_ERR = sigset (%d, %p)", sig, func);
@@ -1455,7 +1455,7 @@ sigpacket::process ()
 	    tls = NULL;
 	}
     }
-      
+
   /* !tls means no threads available to catch a signal. */
   if (!tls)
     {

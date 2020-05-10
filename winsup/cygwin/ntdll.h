@@ -557,7 +557,8 @@ enum
 enum
 {
   FILE_PIPE_BYTE_STREAM_TYPE = 0,
-  FILE_PIPE_MESSAGE_TYPE = 1
+  FILE_PIPE_MESSAGE_TYPE = 1,
+  FILE_PIPE_REJECT_REMOTE_CLIENTS = 2
 };
 
 typedef struct _FILE_PIPE_PEEK_BUFFER {
@@ -1426,6 +1427,9 @@ extern "C"
   NTSTATUS NTAPI NtMapViewOfSection (HANDLE, HANDLE, PVOID *, ULONG_PTR, SIZE_T,
 				     PLARGE_INTEGER, PSIZE_T, SECTION_INHERIT,
 				     ULONG, ULONG);
+  NTSTATUS NTAPI NtMapViewOfSectionEx (HANDLE, HANDLE, PVOID *, PLARGE_INTEGER,
+				       PSIZE_T, ULONG, ULONG,
+				       PMEM_EXTENDED_PARAMETER, ULONG);
   NTSTATUS NTAPI NtNotifyChangeDirectoryFile (HANDLE, HANDLE, PIO_APC_ROUTINE,
 					      PVOID, PIO_STATUS_BLOCK,
 					      PFILE_NOTIFY_INFORMATION, ULONG,
@@ -1469,7 +1473,7 @@ extern "C"
   NTSTATUS NTAPI NtQueryInformationToken (HANDLE, TOKEN_INFORMATION_CLASS,
 					  PVOID, ULONG, PULONG);
   NTSTATUS NTAPI NtQueryObject (HANDLE, OBJECT_INFORMATION_CLASS, PVOID, ULONG,
-  				PULONG);
+				PULONG);
   NTSTATUS NTAPI NtQueryQuotaInformationFile (HANDLE, PIO_STATUS_BLOCK, PVOID,
 					      ULONG, BOOLEAN, PVOID, ULONG,
 					      PSID, BOOLEAN);
@@ -1762,4 +1766,17 @@ extern "C"
     return status;
   }
 }
+
+/* This is for pseudo console workaround. ClosePseudoConsole()
+   seems to have a bug that one internal handle remains opend.
+   This causes handle leak. To close this handle, it is needed
+   to access internal of HPCON. HPCON_INTERNAL is defined for
+   this purpose. The structure of internal of HPCON is not
+   documented. Refer to: https://github.com/Biswa96/XConPty */
+typedef struct _HPCON_INTERNAL
+{
+  HANDLE hWritePipe;
+  HANDLE hConDrvReference;
+  HANDLE hConHostProcess;
+} HPCON_INTERNAL;
 #endif

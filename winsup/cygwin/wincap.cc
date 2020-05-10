@@ -42,6 +42,10 @@ wincaps wincap_vista __attribute__((section (".cygwin_dll_common"), shared)) = {
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:true,
     has_con_24bit_colors:false,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -69,6 +73,10 @@ wincaps wincap_7 __attribute__((section (".cygwin_dll_common"), shared)) = {
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:true,
     has_con_24bit_colors:false,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -96,6 +104,10 @@ wincaps wincap_8 __attribute__((section (".cygwin_dll_common"), shared)) = {
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:false,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -123,6 +135,10 @@ wincaps wincap_8_1 __attribute__((section (".cygwin_dll_common"), shared)) = {
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:false,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -150,6 +166,10 @@ wincaps  wincap_10_1507 __attribute__((section (".cygwin_dll_common"), shared)) 
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:false,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -177,6 +197,10 @@ wincaps wincap_10_1703 __attribute__((section (".cygwin_dll_common"), shared)) =
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:true,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -204,6 +228,10 @@ wincaps wincap_10_1709 __attribute__((section (".cygwin_dll_common"), shared)) =
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:true,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:false,
   },
 };
 
@@ -231,6 +259,10 @@ wincaps wincap_10_1803 __attribute__((section (".cygwin_dll_common"), shared)) =
     has_posix_rename_semantics:false,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:true,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:true,
   },
 };
 
@@ -258,6 +290,41 @@ wincaps wincap_10_1809 __attribute__((section (".cygwin_dll_common"), shared)) =
     has_posix_rename_semantics:true,
     no_msv1_0_s4u_logon_in_wow64:false,
     has_con_24bit_colors:true,
+    has_con_broken_csi3j:true,
+    has_con_broken_il_dl:false,
+    has_con_esc_rep:false,
+    has_extended_mem_api:true,
+  },
+};
+
+wincaps wincap_10_1903 __attribute__((section (".cygwin_dll_common"), shared)) = {
+  def_guard_pages:2,
+  mmap_storage_high:0x700000000000LL,
+  {
+    is_server:false,
+    needs_count_in_si_lpres2:false,
+    needs_query_information:false,
+    has_gaa_largeaddress_bug:false,
+    has_broken_alloc_console:true,
+    has_console_logon_sid:true,
+    has_precise_system_time:true,
+    has_microsoft_accounts:true,
+    has_processor_groups:true,
+    has_broken_prefetchvm:false,
+    has_new_pebteb_region:true,
+    has_broken_whoami:false,
+    has_unprivileged_createsymlink:true,
+    has_unbiased_interrupt_time:true,
+    has_precise_interrupt_time:true,
+    has_posix_unlink_semantics:true,
+    has_case_sensitive_dirs:true,
+    has_posix_rename_semantics:true,
+    no_msv1_0_s4u_logon_in_wow64:false,
+    has_con_24bit_colors:true,
+    has_con_broken_csi3j:false,
+    has_con_broken_il_dl:true,
+    has_con_esc_rep:true,
+    has_extended_mem_api:true,
   },
 };
 
@@ -301,7 +368,9 @@ wincapc::init ()
 	break;
       case 10:
       default:
-	if (likely (version.dwBuildNumber >= 17763))
+	if (likely (version.dwBuildNumber >= 18362))
+	  caps = &wincap_10_1903;
+	else if (version.dwBuildNumber >= 17763)
 	  caps = &wincap_10_1809;
 	else if (version.dwBuildNumber >= 17134)
 	  caps = &wincap_10_1803;

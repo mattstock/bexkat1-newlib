@@ -33,17 +33,6 @@ details. */
 #include "child_info.h"
 #include "cygwait.h"
 
-/* Not yet defined in Mingw-w64 */
-#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
-#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
-#endif /* ENABLE_VIRTUAL_TERMINAL_PROCESSING */
-#ifndef DISABLE_NEWLINE_AUTO_RETURN
-#define DISABLE_NEWLINE_AUTO_RETURN 0x0008
-#endif /* DISABLE_NEWLINE_AUTO_RETURN */
-#ifndef ENABLE_VIRTUAL_TERMINAL_INPUT
-#define ENABLE_VIRTUAL_TERMINAL_INPUT 0x0200
-#endif /* ENABLE_VIRTUAL_TERMINAL_INPUT */
-
 /* Don't make this bigger than NT_MAX_PATH as long as the temporary buffer
    is allocated using tmp_pathbuf!!! */
 #define CONVERT_LIMIT NT_MAX_PATH
@@ -63,6 +52,35 @@ const unsigned fhandler_console::MAX_WRITE_CHARS = 16384;
 fhandler_console::console_state NO_COPY *fhandler_console::shared_console_info;
 
 bool NO_COPY fhandler_console::invisible_console;
+
+/* con_ra is shared in the same process.
+   Only one console can exist in a process, therefore, static is suitable. */
+static struct fhandler_base::rabuf_t con_ra;
+
+/* Write pending buffer for ESC sequence handling
+   in xterm compatible mode */
+static unsigned char last_char;
+
+/* simple helper class to accumulate output in a buffer
+   and send that to the console on request: */
+static class write_pending_buffer
+{
+private:
+  static const size_t WPBUF_LEN = 256u;
+  unsigned char buf[WPBUF_LEN];
+  size_t ixput;
+public:
+  inline void put (unsigned char x)
+  {
+    if (ixput < WPBUF_LEN)
+      buf[ixput++] = x;
+  }
+  inline void empty () { ixput = 0u; }
+  inline void send (HANDLE &handle, DWORD *wn = NULL)
+  {
+    WriteConsoleA (handle, buf, ixput, wn, 0);
+  }
+} wpbuf;
 
 static void
 beep ()
@@ -167,13 +185,17 @@ fhandler_console::set_unit ()
 	  tty_min_state.setntty (DEV_CONS_MAJOR, console_unit (me));
       devset = (fh_devices) shared_console_info->tty_min_state.getntty ();
       if (created)
-	con.owner = getpid ();
+	{
+	  con.owner = myself->pid;
+	  con.xterm_mode_input = 0;
+	  con.xterm_mode_output = 0;
+	}
     }
   if (!created && shared_console_info)
     {
       pinfo p (con.owner);
       if (!p)
-	con.owner = getpid ();
+	con.owner = myself->pid;
     }
 
   dev ().parse (devset);
@@ -199,6 +221,8 @@ fhandler_console::setup ()
       con.dwLastCursorPosition.Y = -1;
       con.dwLastMousePosition.X = -1;
       con.dwLastMousePosition.Y = -1;
+      con.savex = con.savey = -1;
+      con.screen_alternated = false;
       con.dwLastButtonState = 0;	/* none pressed */
       con.last_button_code = 3;	/* released */
       con.underline_color = FOREGROUND_GREEN | FOREGROUND_BLUE;
@@ -219,6 +243,90 @@ fhandler_console::setup ()
       con.backspace_keycode = CERASE;
       con.cons_rapoi = NULL;
       shared_console_info->tty_min_state.is_console = true;
+    }
+}
+
+char *&
+fhandler_console::rabuf ()
+{
+  return con_ra.rabuf;
+}
+
+size_t &
+fhandler_console::ralen ()
+{
+  return con_ra.ralen;
+}
+
+size_t &
+fhandler_console::raixget ()
+{
+  return con_ra.raixget;
+}
+
+size_t &
+fhandler_console::raixput ()
+{
+  return con_ra.raixput;
+}
+
+size_t &
+fhandler_console::rabuflen ()
+{
+  return con_ra.rabuflen;
+}
+
+void
+fhandler_console::request_xterm_mode_input (bool req)
+{
+  if (con_is_legacy)
+    return;
+  if (req)
+    {
+      if (InterlockedExchange (&con.xterm_mode_input, 1) == 0)
+	{
+	  DWORD dwMode;
+	  GetConsoleMode (get_handle (), &dwMode);
+	  dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+	  SetConsoleMode (get_handle (), dwMode);
+	}
+    }
+  else
+    {
+      if (InterlockedExchange (&con.xterm_mode_input, 0) == 1)
+	{
+	  DWORD dwMode;
+	  GetConsoleMode (get_handle (), &dwMode);
+	  dwMode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
+	  SetConsoleMode (get_handle (), dwMode);
+	}
+    }
+}
+
+void
+fhandler_console::request_xterm_mode_output (bool req)
+{
+  if (con_is_legacy)
+    return;
+  if (req)
+    {
+      if (InterlockedExchange (&con.xterm_mode_output, 1) == 0)
+	{
+	  DWORD dwMode;
+	  GetConsoleMode (get_output_handle (), &dwMode);
+	  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+	  SetConsoleMode (get_output_handle (), dwMode);
+	}
+    }
+  else
+    {
+      if (InterlockedExchange (&con.xterm_mode_output, 0) == 1)
+	{
+	  DWORD dwMode;
+	  GetConsoleMode (get_output_handle (), &dwMode);
+	  dwMode &= ~ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+	  SetConsoleMode (get_output_handle (), dwMode);
+	}
     }
 }
 
@@ -322,21 +430,13 @@ fhandler_console::set_cursor_maybe ()
 
 /* Workaround for a bug of windows xterm compatible mode. */
 /* The horizontal tab positions are broken after resize. */
-static void
-fix_tab_position (HANDLE h, SHORT width)
+void
+fhandler_console::fix_tab_position (void)
 {
-  char buf[2048] = {0,};
-  /* Save cursor position */
-  __small_sprintf (buf+strlen (buf), "\0337");
-  /* Clear all horizontal tabs */
-  __small_sprintf (buf+strlen (buf), "\033[3g");
-  /* Set horizontal tabs */
-  for (int col=8; col<width; col+=8)
-    __small_sprintf (buf+strlen (buf), "\033[%d;%dH\033H", 1, col+1);
-  /* Restore cursor position */
-  __small_sprintf (buf+strlen (buf), "\0338");
-  DWORD dwLen;
-  WriteConsole (h, buf, strlen (buf), &dwLen, 0);
+  /* Re-setting ENABLE_VIRTUAL_TERMINAL_PROCESSING
+     fixes the tab position. */
+  request_xterm_mode_output (false);
+  request_xterm_mode_output (true);
 }
 
 bool
@@ -351,7 +451,7 @@ fhandler_console::send_winch_maybe ()
       con.scroll_region.Top = 0;
       con.scroll_region.Bottom = -1;
       if (wincap.has_con_24bit_colors () && !con_is_legacy)
-	fix_tab_position (get_output_handle (), con.dwWinSize.X);
+	fix_tab_position ();
       get_ttyp ()->kill_pgrp (SIGWINCH);
       return true;
     }
@@ -399,12 +499,18 @@ fhandler_console::read (void *pv, size_t& buflen)
 
   set_input_state ();
 
+  /* if system has 24 bit color capability, use xterm compatible mode. */
+  if (wincap.has_con_24bit_colors ())
+    request_xterm_mode_input (true);
+
   while (!input_ready && !get_cons_readahead_valid ())
     {
       int bgres;
       if ((bgres = bg_check (SIGTTIN)) <= bg_eof)
 	{
 	  buflen = bgres;
+	  if (wincap.has_con_24bit_colors ())
+	    request_xterm_mode_input (false);
 	  return;
 	}
 
@@ -422,6 +528,8 @@ fhandler_console::read (void *pv, size_t& buflen)
 	case WAIT_TIMEOUT:
 	  set_sig_errno (EAGAIN);
 	  buflen = (size_t) -1;
+	  if (wincap.has_con_24bit_colors ())
+	    request_xterm_mode_input (false);
 	  return;
 	default:
 	  goto err;
@@ -462,37 +570,34 @@ fhandler_console::read (void *pv, size_t& buflen)
   copied_chars +=
     get_readahead_into_buffer (buf + copied_chars, buflen);
 
-  if (!ralen)
+  if (!con_ra.ralen)
     input_ready = false;
   release_input_mutex ();
 
 #undef buf
 
   buflen = copied_chars;
+  if (wincap.has_con_24bit_colors ())
+    request_xterm_mode_input (false);
   return;
 
 err:
   __seterrno ();
   buflen = (size_t) -1;
+  if (wincap.has_con_24bit_colors ())
+    request_xterm_mode_input (false);
   return;
 
 sig_exit:
   set_sig_errno (EINTR);
   buflen = (size_t) -1;
+  if (wincap.has_con_24bit_colors ())
+    request_xterm_mode_input (false);
 }
 
 fhandler_console::input_states
 fhandler_console::process_input_message (void)
 {
-  if (wincap.has_con_24bit_colors () && !con_is_legacy)
-    {
-      DWORD dwMode;
-      /* Enable xterm compatible mode in input */
-      GetConsoleMode (get_handle (), &dwMode);
-      dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-      SetConsoleMode (get_handle (), dwMode);
-    }
-
   char tmp[60];
 
   if (!shared_console_info)
@@ -850,7 +955,9 @@ fhandler_console::process_input_message (void)
       if (toadd)
 	{
 	  ssize_t ret;
+	  release_input_mutex ();
 	  line_edit_status res = line_edit (toadd, nread, *ti, &ret);
+	  acquire_input_mutex (INFINITE);
 	  if (res == line_edit_signalled)
 	    {
 	      stat = input_signalled;
@@ -1019,24 +1126,23 @@ fhandler_console::open (int flags, mode_t)
   get_ttyp ()->rstcons (false);
   set_open_status ();
 
-  if (getpid () == con.owner && wincap.has_con_24bit_colors ())
+  if (myself->pid == con.owner && wincap.has_con_24bit_colors ())
     {
+      bool is_legacy = false;
       DWORD dwMode;
-      /* Enable xterm compatible mode in output */
+      /* Check xterm compatible mode in output */
       GetConsoleMode (get_output_handle (), &dwMode);
-      dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-      if (!SetConsoleMode (get_output_handle (), dwMode))
-	con.is_legacy = true;
-      else
-	con.is_legacy = false;
-      /* Enable xterm compatible mode in input */
-      if (!con_is_legacy)
-	{
-	  GetConsoleMode (get_handle (), &dwMode);
-	  dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-	  if (!SetConsoleMode (get_handle (), dwMode))
-	    con.is_legacy = true;
-	}
+      if (!SetConsoleMode (get_output_handle (),
+			   dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
+	is_legacy = true;
+      SetConsoleMode (get_output_handle (), dwMode);
+      /* Check xterm compatible mode in input */
+      GetConsoleMode (get_handle (), &dwMode);
+      if (!SetConsoleMode (get_handle (),
+			   dwMode | ENABLE_VIRTUAL_TERMINAL_INPUT))
+	is_legacy = true;
+      SetConsoleMode (get_handle (), dwMode);
+      con.is_legacy = is_legacy;
       extern int sawTERM;
       if (con_is_legacy && !sawTERM)
 	setenv ("TERM", "cygwin", 1);
@@ -1069,27 +1175,33 @@ fhandler_console::close ()
 {
   debug_printf ("closing: %p, %p", get_handle (), get_output_handle ());
 
+  acquire_output_mutex (INFINITE);
+
+  if (shared_console_info && wincap.has_con_24bit_colors ())
+    {
+      /* Restore console mode if this is the last closure. */
+      OBJECT_BASIC_INFORMATION obi;
+      NTSTATUS status;
+      status = NtQueryObject (get_handle (), ObjectBasicInformation,
+			      &obi, sizeof obi, NULL);
+      if ((NT_SUCCESS (status) && obi.HandleCount == 1)
+	  || myself->pid == con.owner)
+	request_xterm_mode_output (false);
+      request_xterm_mode_input (false);
+    }
+
+  release_output_mutex ();
+
   CloseHandle (input_mutex);
   input_mutex = NULL;
   CloseHandle (output_mutex);
   output_mutex = NULL;
 
-  if (shared_console_info && getpid () == con.owner &&
-      wincap.has_con_24bit_colors () && !con_is_legacy)
-    {
-      DWORD dwMode;
-      /* Disable xterm compatible mode in input */
-      GetConsoleMode (get_handle (), &dwMode);
-      dwMode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
-      SetConsoleMode (get_handle (), dwMode);
-      /* Disable xterm compatible mode in output */
-      GetConsoleMode (get_output_handle (), &dwMode);
-      dwMode &= ~ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-      SetConsoleMode (get_output_handle (), dwMode);
-    }
-
   CloseHandle (get_handle ());
   CloseHandle (get_output_handle ());
+
+  if (con_ra.rabuf)
+    free (con_ra.rabuf);
 
   /* If already attached to pseudo console, don't call free_console () */
   cygheap_fdenum cfd (false);
@@ -1184,10 +1296,39 @@ fhandler_console::ioctl (unsigned int cmd, void *arg)
 	      release_output_mutex ();
 	      return -1;
 	    }
-	  while (n-- > 0)
-	    if (inp[n].EventType == KEY_EVENT && inp[n].Event.KeyEvent.bKeyDown)
-	      ++ret;
-	  *(int *) arg = ret;
+	  bool saw_eol = false;
+	  for (DWORD i=0; i<n; i++)
+	    if (inp[i].EventType == KEY_EVENT &&
+		inp[i].Event.KeyEvent.bKeyDown &&
+		inp[i].Event.KeyEvent.uChar.UnicodeChar)
+	      {
+		WCHAR wc = inp[i].Event.KeyEvent.uChar.UnicodeChar;
+		char mbs[8];
+		int len = con.con_to_str (mbs, sizeof (mbs), wc);
+		if ((get_ttyp ()->ti.c_lflag & ICANON) &&
+		    len == 1 && CCEQ (get_ttyp ()->ti.c_cc[VEOF], mbs[0]))
+		  {
+		    saw_eol = true;
+		    break;
+		  }
+		ret += len;
+		const char eols[] = {
+		  '\n',
+		  '\r',
+		  (char) get_ttyp ()->ti.c_cc[VEOL],
+		  (char) get_ttyp ()->ti.c_cc[VEOL2]
+		};
+		if ((get_ttyp ()->ti.c_lflag & ICANON) &&
+		    len == 1 && memchr (eols, mbs[0], sizeof (eols)))
+		  {
+		    saw_eol = true;
+		    break;
+		  }
+	      }
+	  if ((get_ttyp ()->ti.c_lflag & ICANON) && !saw_eol)
+	    *(int *) arg = 0;
+	  else
+	    *(int *) arg = ret;
 	  release_output_mutex ();
 	  return 0;
 	}
@@ -1220,14 +1361,9 @@ fhandler_console::output_tcsetattr (int, struct termios const *t)
   /* All the output bits we can ignore */
 
   acquire_output_mutex (INFINITE);
+  if (wincap.has_con_24bit_colors ())
+    request_xterm_mode_output (false);
   DWORD flags = ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT;
-  /* If system has 24 bit color capability, use xterm compatible mode. */
-  if (wincap.has_con_24bit_colors () && !con_is_legacy)
-    {
-      flags |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-      if (!(t->c_oflag & OPOST) || !(t->c_oflag & ONLCR))
-	flags |= DISABLE_NEWLINE_AUTO_RETURN;
-    }
 
   int res = SetConsoleMode (get_output_handle (), flags) ? 0 : -1;
   if (res)
@@ -1289,9 +1425,6 @@ fhandler_console::input_tcsetattr (int, struct termios const *t)
   flags |= ENABLE_WINDOW_INPUT |
     ((wincap.has_con_24bit_colors () && !con_is_legacy) ?
      0 : ENABLE_MOUSE_INPUT);
-  /* if system has 24 bit color capability, use xterm compatible mode. */
-  if (wincap.has_con_24bit_colors () && !con_is_legacy)
-    flags |= ENABLE_VIRTUAL_TERMINAL_INPUT;
 
   int res;
   if (flags == oflags)
@@ -1659,15 +1792,9 @@ static const wchar_t __vt100_conv[31] = {
 	0x00B7, /* Middle Dot */
 };
 
-inline
-bool fhandler_console::write_console (PWCHAR buf, DWORD len, DWORD& done)
+inline bool
+fhandler_console::write_console (PWCHAR buf, DWORD len, DWORD& done)
 {
-  bool need_fix_tab_position = false;
-  /* Check if screen will be alternated. */
-  if (wincap.has_con_24bit_colors () && !con_is_legacy
-      && memmem (buf, len*sizeof (WCHAR), L"\033[?1049", 7*sizeof (WCHAR)))
-    need_fix_tab_position = true;
-
   if (con.iso_2022_G1
 	? con.vt100_graphics_mode_G1
 	: con.vt100_graphics_mode_G0)
@@ -1686,9 +1813,6 @@ bool fhandler_console::write_console (PWCHAR buf, DWORD len, DWORD& done)
       len -= done;
       buf += done;
     }
-  /* Call fix_tab_position() if screen has been alternated. */
-  if (need_fix_tab_position)
-    fix_tab_position (get_output_handle (), con.dwWinSize.X);
   return true;
 }
 
@@ -1888,10 +2012,188 @@ fhandler_console::char_command (char c)
   char buf[40];
   int r, g, b;
 
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
+    {
+      /* For xterm compatible mode */
+      switch (c)
+	{
+#if 0 /* These sequences, which are supported by real xterm, are
+	 not supported by xterm compatible mode. Therefore they
+	 were implemented once. However, these are not declared
+	 in terminfo of xterm-256color, therefore, do not appear
+	 to be necessary. */
+	case '`': /* HPA */
+	  if (con.args[0] == 0)
+	    con.args[0] = 1;
+	  cursor_get (&x, &y);
+	  cursor_set (false, con.args[0]-1, y);
+	  break;
+	case 'a': /* HPR */
+	  if (con.args[0] == 0)
+	    con.args[0] = 1;
+	  cursor_rel (con.args[0], 0);
+	  break;
+	case 'e': /* VPR */
+	  if (con.args[0] == 0)
+	    con.args[0] = 1;
+	  cursor_rel (0, con.args[0]);
+	  break;
+#endif
+	case 'b': /* REP */
+	  wpbuf.put (c);
+	  if (wincap.has_con_esc_rep ())
+	    /* Just send the sequence */
+	    wpbuf.send (get_output_handle ());
+	  else if (last_char && last_char != '\n')
+	    for (int i = 0; i < con.args[0]; i++)
+	      WriteConsoleA (get_output_handle (), &last_char, 1, 0, 0);
+	  break;
+	case 'r': /* DECSTBM */
+	  con.scroll_region.Top = con.args[0] ? con.args[0] - 1 : 0;
+	  con.scroll_region.Bottom = con.args[1] ? con.args[1] - 1 : -1;
+	  wpbuf.put (c);
+	  /* Just send the sequence */
+	  wpbuf.send (get_output_handle ());
+	  break;
+	case 'L': /* IL */
+	  if (wincap.has_con_broken_il_dl ())
+	    {
+	      /* Use "CSI Ps T" instead */
+	      cursor_get (&x, &y);
+	      if (y < srTop || y > srBottom)
+		break;
+	      if (y == con.b.srWindow.Top
+		  && srBottom == con.b.srWindow.Bottom)
+		{
+		  /* Erase scroll down area */
+		  n = con.args[0] ? : 1;
+		  __small_sprintf (buf, "\033[%d;1H\033[J\033[%d;%dH",
+				   srBottom - (n-1) - con.b.srWindow.Top + 1,
+				   y + 1 - con.b.srWindow.Top, x + 1);
+		  WriteConsoleA (get_output_handle (),
+				 buf, strlen (buf), 0, 0);
+		}
+	      __small_sprintf (buf, "\033[%d;%dr",
+			       y + 1 - con.b.srWindow.Top,
+			       srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      wpbuf.put ('T');
+	      wpbuf.send (get_output_handle ());
+	      __small_sprintf (buf, "\033[%d;%dr",
+			       srTop + 1 - con.b.srWindow.Top,
+			       srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      __small_sprintf (buf, "\033[%d;%dH",
+			       y + 1 - con.b.srWindow.Top, x + 1);
+	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	    }
+	  else
+	    {
+	      wpbuf.put (c);
+	      /* Just send the sequence */
+	      wpbuf.send (get_output_handle ());
+	    }
+	  break;
+	case 'M': /* DL */
+	  if (wincap.has_con_broken_il_dl ())
+	    {
+	      /* Use "CSI Ps S" instead */
+	      cursor_get (&x, &y);
+	      if (y < srTop || y > srBottom)
+		break;
+	      __small_sprintf (buf, "\033[%d;%dr",
+			       y + 1 - con.b.srWindow.Top,
+			       srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      wpbuf.put ('S');
+	      wpbuf.send (get_output_handle ());
+	      __small_sprintf (buf, "\033[%d;%dr",
+			       srTop + 1 - con.b.srWindow.Top,
+			       srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      __small_sprintf (buf, "\033[%d;%dH",
+			       y + 1 - con.b.srWindow.Top, x + 1);
+	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	    }
+	  else
+	    {
+	      wpbuf.put (c);
+	      /* Just send the sequence */
+	      wpbuf.send (get_output_handle ());
+	    }
+	  break;
+	case 'J': /* ED */
+	  wpbuf.put (c);
+	  if (con.args[0] == 3 && con.savey >= 0)
+	    {
+	      con.fillin (get_output_handle ());
+	      con.savey -= con.b.srWindow.Top;
+	    }
+	  if (con.args[0] == 3 && wincap.has_con_broken_csi3j ())
+	    { /* Workaround for broken CSI3J in Win10 1809 */
+	      CONSOLE_SCREEN_BUFFER_INFO sbi;
+	      GetConsoleScreenBufferInfo (get_output_handle (), &sbi);
+	      SMALL_RECT r = {0, sbi.srWindow.Top,
+		(SHORT) (sbi.dwSize.X - 1), (SHORT) (sbi.dwSize.Y - 1)};
+	      CHAR_INFO f = {' ', sbi.wAttributes};
+	      COORD d = {0, 0};
+	      ScrollConsoleScreenBufferA (get_output_handle (),
+					  &r, NULL, d, &f);
+	      SetConsoleCursorPosition (get_output_handle (), d);
+	      d = sbi.dwCursorPosition;
+	      d.Y -= sbi.srWindow.Top;
+	      SetConsoleCursorPosition (get_output_handle (), d);
+	    }
+	  else
+	    /* Just send the sequence */
+	    wpbuf.send (get_output_handle ());
+	  break;
+	case 'h': /* DECSET */
+	case 'l': /* DECRST */
+	  if (c == 'h')
+	    con.screen_alternated = true;
+	  else
+	    con.screen_alternated = false;
+	  wpbuf.put (c);
+	  /* Just send the sequence */
+	  wpbuf.send (get_output_handle ());
+	  if (con.saw_question_mark)
+	    {
+	      bool need_fix_tab_position = false;
+	      for (int i = 0; i < con.nargs; i++)
+		if (con.args[i] == 1049)
+		  need_fix_tab_position = true;
+	      /* Call fix_tab_position() if screen has been alternated. */
+	      if (need_fix_tab_position)
+		fix_tab_position ();
+	    }
+	  break;
+	case 'p':
+	  if (con.saw_exclamation_mark) /* DECSTR Soft reset */
+	    {
+	      con.scroll_region.Top = 0;
+	      con.scroll_region.Bottom = -1;
+	      con.savex = con.savey = -1;
+	    }
+	  wpbuf.put (c);
+	  /* Just send the sequence */
+	  wpbuf.send (get_output_handle ());
+	  break;
+	default:
+	  /* Other escape sequences */
+	  wpbuf.put (c);
+	  /* Just send the sequence */
+	  wpbuf.send (get_output_handle ());
+	  break;
+	}
+      return;
+    }
+
+  /* For legacy cygwin treminal */
   switch (c)
     {
     case 'm':   /* Set Graphics Rendition */
-       for (int i = 0; i <= con.nargs; i++)
+       for (int i = 0; i < con.nargs; i++)
 	 switch (con.args[i])
 	   {
 	     case 0:    /* normal color */
@@ -1959,38 +2261,39 @@ fhandler_console::char_command (char c)
 	       con.fg = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED;
 	       break;
 	     case 38:
-	       if (con.nargs < 1)
+	       if (con.nargs < i + 2)
 		 /* Sequence error (abort) */
 		 break;
-	       switch (con.args[1])
+	       switch (con.args[i + 1])
 		 {
 		 case 2:
-		   if (con.nargs != 4)
+		   if (con.nargs < i + 5)
 		     /* Sequence error (abort) */
 		     break;
-		   r = con.args[2];
-		   g = con.args[3];
-		   b = con.args[4];
+		   r = con.args[i + 2];
+		   g = con.args[i + 3];
+		   b = con.args[i + 4];
 		   r = r < (95 + 1) / 2 ? 0 : r > 255 ? 5 : (r - 55 + 20) / 40;
 		   g = g < (95 + 1) / 2 ? 0 : g > 255 ? 5 : (g - 55 + 20) / 40;
 		   b = b < (95 + 1) / 2 ? 0 : b > 255 ? 5 : (b - 55 + 20) / 40;
 		   con.fg = table256[16 + r*36 + g*6 + b];
+		   i += 4;
 		   break;
 		 case 5:
-		   if (con.nargs != 2)
+		   if (con.nargs < i + 3)
 		     /* Sequence error (abort) */
 		     break;
 		   {
-		     int idx = con.args[2];
+		     int idx = con.args[i + 2];
 		     if (idx < 0)
 		       idx = 0;
 		     if (idx > 255)
 		       idx = 255;
 		     con.fg = table256[idx];
+		     i += 2;
 		   }
 		   break;
 		 }
-	       i += con.nargs;
 	       break;
 	     case 39:
 	       con.fg = con.default_color & FOREGROUND_ATTR_MASK;
@@ -2020,38 +2323,39 @@ fhandler_console::char_command (char c)
 	       con.bg = BACKGROUND_BLUE | BACKGROUND_GREEN | BACKGROUND_RED;
 	       break;
 	     case 48:
-	       if (con.nargs < 1)
+	       if (con.nargs < i + 2)
 		 /* Sequence error (abort) */
 		 break;
-	       switch (con.args[1])
+	       switch (con.args[i + 1])
 		 {
 		 case 2:
-		   if (con.nargs != 4)
+		   if (con.nargs < i + 5)
 		     /* Sequence error (abort) */
 		     break;
-		   r = con.args[2];
-		   g = con.args[3];
-		   b = con.args[4];
+		   r = con.args[i + 2];
+		   g = con.args[i + 3];
+		   b = con.args[i + 4];
 		   r = r < (95 + 1) / 2 ? 0 : r > 255 ? 5 : (r - 55 + 20) / 40;
 		   g = g < (95 + 1) / 2 ? 0 : g > 255 ? 5 : (g - 55 + 20) / 40;
 		   b = b < (95 + 1) / 2 ? 0 : b > 255 ? 5 : (b - 55 + 20) / 40;
 		   con.bg = table256[16 + r*36 + g*6 + b] << 4;
+		   i += 4;
 		   break;
 		 case 5:
-		   if (con.nargs != 2)
+		   if (con.nargs < i + 3)
 		     /* Sequence error (abort) */
 		     break;
 		   {
-		     int idx = con.args[2];
+		     int idx = con.args[i + 2];
 		     if (idx < 0)
 		       idx = 0;
 		     if (idx > 255)
 		       idx = 255;
 		     con.bg = table256[idx] << 4;
+		     i += 2;
 		   }
 		   break;
 		 }
-	       i += con.nargs;
 	       break;
 	     case 49:
 	       con.bg = con.default_color & BACKGROUND_ATTR_MASK;
@@ -2512,8 +2816,10 @@ fhandler_console::write_normal (const unsigned char *src,
   memset (&ps, 0, sizeof ps);
   while (found < end
 	 && found - src < CONVERT_LIMIT
+	 && base_chars[*found] != IGN
+	 && base_chars[*found] != ESC
 	 && ((wincap.has_con_24bit_colors () && !con_is_legacy)
-	     || base_chars[*found] == NOR) )
+	     || base_chars[*found] == NOR))
     {
       switch (ret = f_mbtowc (_REENT, NULL, (const char *) found,
 			       end - found, &ps))
@@ -2529,6 +2835,7 @@ fhandler_console::write_normal (const unsigned char *src,
 	  break;
 	default:
 	  found += ret;
+	  last_char = *(found - 1);
 	  break;
 	}
     }
@@ -2583,6 +2890,7 @@ do_print:
 	  break;
 	case ESC:
 	  con.state = gotesc;
+	  wpbuf.put (*found);
 	  break;
 	case DWN:
 	  cursor_get (&x, &y);
@@ -2603,7 +2911,9 @@ do_print:
 	  cursor_rel (-1, 0);
 	  break;
 	case IGN:
-	  cursor_rel (1, 0);
+	 /* Up to release 3.1.3 we called cursor_rel (1, 0); to move the cursor
+	    one step to the right.  However, that neither matches the terminfo
+	    for the cygwin terminal, nor the one for the xterm terminal. */
 	  break;
 	case CR:
 	  cursor_get (&x, &y);
@@ -2653,6 +2963,21 @@ fhandler_console::write (const void *vsrc, size_t len)
   push_process_state process_state (PID_TTYOU);
   acquire_output_mutex (INFINITE);
 
+  /* If system has 24 bit color capability, use xterm compatible mode. */
+  if (wincap.has_con_24bit_colors ())
+    request_xterm_mode_output (true);
+  if (wincap.has_con_24bit_colors () && !con_is_legacy)
+    {
+      DWORD dwMode;
+      GetConsoleMode (get_output_handle (), &dwMode);
+      if (!(get_ttyp ()->ti.c_oflag & OPOST) ||
+	  !(get_ttyp ()->ti.c_oflag & ONLCR))
+	dwMode |= DISABLE_NEWLINE_AUTO_RETURN;
+      else
+	dwMode &= ~DISABLE_NEWLINE_AUTO_RETURN;
+      SetConsoleMode (get_output_handle (), dwMode);
+    }
+
   /* Run and check for ansi sequences */
   unsigned const char *src = (unsigned char *) vsrc;
   unsigned const char *end = src + len;
@@ -2680,25 +3005,103 @@ fhandler_console::write (const void *vsrc, size_t len)
 	case gotesc:
 	  if (*src == '[')		/* CSI Control Sequence Introducer */
 	    {
+	      wpbuf.put (*src);
 	      con.state = gotsquare;
 	      memset (con.args, 0, sizeof con.args);
 	      con.nargs = 0;
 	      con.saw_question_mark = false;
 	      con.saw_greater_than_sign = false;
 	      con.saw_space = false;
+	      con.saw_exclamation_mark = false;
+	    }
+	  else if (*src == '8')		/* DECRC Restore cursor position */
+	    {
+	      if (con.screen_alternated)
+		{
+		  /* For xterm mode only */
+		  /* Just send the sequence */
+		  wpbuf.put (*src);
+		  wpbuf.send (get_output_handle ());
+		}
+	      else if (con.savex >= 0 && con.savey >= 0)
+		cursor_set (false, con.savex, con.savey);
+	      con.state = normal;
+	      wpbuf.empty();
+	    }
+	  else if (*src == '7')		/* DECSC Save cursor position */
+	    {
+	      if (con.screen_alternated)
+		{
+		  /* For xterm mode only */
+		  /* Just send the sequence */
+		  wpbuf.put (*src);
+		  wpbuf.send (get_output_handle ());
+		}
+	      else
+		cursor_get (&con.savex, &con.savey);
+	      con.state = normal;
+	      wpbuf.empty();
+	    }
+	  else if (wincap.has_con_24bit_colors () && !con_is_legacy
+		   && wincap.has_con_broken_il_dl () && *src == 'M')
+	    { /* Reverse Index (scroll down) */
+	      int x, y;
+	      cursor_get (&x, &y);
+	      if (y == srTop)
+		{
+		  if (y == con.b.srWindow.Top
+		      && srBottom == con.b.srWindow.Bottom)
+		    {
+		      /* Erase scroll down area */
+		      char buf[] = "\033[32768;1H\033[J\033[32768;32768";
+		      __small_sprintf (buf, "\033[%d;1H\033[J\033[%d;%dH",
+				       srBottom - con.b.srWindow.Top + 1,
+				       y + 1 - con.b.srWindow.Top, x + 1);
+		      WriteConsoleA (get_output_handle (),
+				     buf, strlen (buf), 0, 0);
+		    }
+		  /* Substitute "CSI Ps T" */
+		  wpbuf.put ('[');
+		  wpbuf.put ('T');
+		}
+	      else
+		wpbuf.put (*src);
+	      wpbuf.send (get_output_handle ());
+	      con.state = normal;
+	      wpbuf.empty();
+	    }
+	  else if (wincap.has_con_24bit_colors () && !con_is_legacy)
+	    {
+	      if (*src == 'c') /* RIS Full reset */
+		{
+		  con.scroll_region.Top = 0;
+		  con.scroll_region.Bottom = -1;
+		  con.savex = con.savey = -1;
+		}
+	      /* ESC sequences below (e.g. OSC, etc) are left to xterm
+		 emulation in xterm compatible mode, therefore, are not
+		 handled and just sent them. */
+	      wpbuf.put (*src);
+	      /* Just send the sequence */
+	      wpbuf.send (get_output_handle ());
+	      con.state = normal;
+	      wpbuf.empty();
 	    }
 	  else if (*src == ']')		/* OSC Operating System Command */
 	    {
+	      wpbuf.put (*src);
 	      con.rarg = 0;
 	      con.my_title_buf[0] = '\0';
 	      con.state = gotrsquare;
 	    }
 	  else if (*src == '(')		/* Designate G0 character set */
 	    {
+	      wpbuf.put (*src);
 	      con.state = gotparen;
 	    }
 	  else if (*src == ')')		/* Designate G1 character set */
 	    {
+	      wpbuf.put (*src);
 	      con.state = gotrparen;
 	    }
 	  else if (*src == 'M')		/* Reverse Index (scroll down) */
@@ -2706,6 +3109,7 @@ fhandler_console::write (const void *vsrc, size_t len)
 	      con.fillin (get_output_handle ());
 	      scroll_buffer_screen (0, 0, -1, -1, 0, 1);
 	      con.state = normal;
+	      wpbuf.empty();
 	    }
 	  else if (*src == 'c')		/* RIS Full Reset */
 	    {
@@ -2716,40 +3120,38 @@ fhandler_console::write (const void *vsrc, size_t len)
 	      cursor_set (false, 0, 0);
 	      clear_screen (cl_buf_beg, cl_buf_beg, cl_buf_end, cl_buf_end);
 	      con.state = normal;
-	    }
-	  else if (*src == '8')		/* DECRC Restore cursor position */
-	    {
-	      cursor_set (false, con.savex, con.savey);
-	      con.state = normal;
-	    }
-	  else if (*src == '7')		/* DECSC Save cursor position */
-	    {
-	      cursor_get (&con.savex, &con.savey);
-	      con.state = normal;
+	      wpbuf.empty();
 	    }
 	  else if (*src == 'R')		/* ? */
+	    {
 	      con.state = normal;
+	      wpbuf.empty();
+	    }
 	  else
 	    {
 	      con.state = normal;
+	      wpbuf.empty();
 	    }
 	  src++;
 	  break;
 	case gotarg1:
 	  if (isdigit (*src))
 	    {
-	      con.args[con.nargs] = con.args[con.nargs] * 10 + *src - '0';
+	      if (con.nargs < MAXARGS)
+		con.args[con.nargs] = con.args[con.nargs] * 10 + *src - '0';
+	      wpbuf.put (*src);
 	      src++;
 	    }
 	  else if (*src == ';')
 	    {
+	      wpbuf.put (*src);
 	      src++;
-	      con.nargs++;
-	      if (con.nargs >= MAXARGS)
-		con.nargs--;
+	      if (con.nargs < MAXARGS)
+		con.nargs++;
 	    }
 	  else if (*src == ' ')
 	    {
+	      wpbuf.put (*src);
 	      src++;
 	      con.saw_space = true;
 	      con.state = gotcommand;
@@ -2758,8 +3160,11 @@ fhandler_console::write (const void *vsrc, size_t len)
 	    con.state = gotcommand;
 	  break;
 	case gotcommand:
+	  if (con.nargs < MAXARGS)
+	    con.nargs++;
 	  char_command (*src++);
 	  con.state = normal;
+	  wpbuf.empty();
 	  break;
 	case gotrsquare:
 	  if (isdigit (*src))
@@ -2770,6 +3175,7 @@ fhandler_console::write (const void *vsrc, size_t len)
 	    con.state = eatpalette;
 	  else
 	    con.state = eattitle;
+	  wpbuf.put (*src);
 	  src++;
 	  break;
 	case eattitle:
@@ -2781,20 +3187,28 @@ fhandler_console::write (const void *vsrc, size_t len)
 		if (*src == '\007' && con.state == gettitle)
 		  set_console_title (con.my_title_buf);
 		con.state = normal;
+		wpbuf.empty();
 	      }
 	    else if (n < TITLESIZE)
 	      {
 		con.my_title_buf[n++] = *src;
 		con.my_title_buf[n] = '\0';
+		wpbuf.put (*src);
 	      }
 	    src++;
 	    break;
 	  }
 	case eatpalette:
 	  if (*src == '\033')
-	    con.state = endpalette;
+	    {
+	      wpbuf.put (*src);
+	      con.state = endpalette;
+	    }
 	  else if (*src == '\a')
-	    con.state = normal;
+	    {
+	      con.state = normal;
+	      wpbuf.empty();
+	    }
 	  src++;
 	  break;
 	case endpalette:
@@ -2803,13 +3217,16 @@ fhandler_console::write (const void *vsrc, size_t len)
 	  else
 	    /* Sequence error (abort) */
 	    con.state = normal;
+	  wpbuf.empty();
 	  src++;
 	  break;
 	case gotsquare:
 	  if (*src == ';')
 	    {
 	      con.state = gotarg1;
-	      con.nargs++;
+	      wpbuf.put (*src);
+	      if (con.nargs < MAXARGS)
+		con.nargs++;
 	      src++;
 	    }
 	  else if (isalpha (*src))
@@ -2820,6 +3237,9 @@ fhandler_console::write (const void *vsrc, size_t len)
 		con.saw_question_mark = true;
 	      else if (*src == '>')
 		con.saw_greater_than_sign = true;
+	      else if (*src == '!')
+		con.saw_exclamation_mark = true;
+	      wpbuf.put (*src);
 	      /* ignore any extra chars between [ and first arg or command */
 	      src++;
 	    }
@@ -2832,6 +3252,7 @@ fhandler_console::write (const void *vsrc, size_t len)
 	  else
 	    con.vt100_graphics_mode_G0 = false;
 	  con.state = normal;
+	  wpbuf.empty();
 	  src++;
 	  break;
 	case gotrparen:	/* Designate G1 Character Set (ISO 2022) */
@@ -2840,6 +3261,7 @@ fhandler_console::write (const void *vsrc, size_t len)
 	  else
 	    con.vt100_graphics_mode_G1 = false;
 	  con.state = normal;
+	  wpbuf.empty();
 	  src++;
 	  break;
 	}
@@ -2973,14 +3395,6 @@ fhandler_console::fixup_after_fork_exec (bool execing)
 {
   set_unit ();
   setup_io_mutex ();
-  if (wincap.has_con_24bit_colors () && !con_is_legacy)
-    {
-      DWORD dwMode;
-      /* Disable xterm compatible mode in input */
-      GetConsoleMode (get_handle (), &dwMode);
-      dwMode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
-      SetConsoleMode (get_handle (), dwMode);
-    }
 }
 
 // #define WINSTA_ACCESS (WINSTA_READATTRIBUTES | STANDARD_RIGHTS_READ | STANDARD_RIGHTS_WRITE | WINSTA_CREATEDESKTOP | WINSTA_EXITWINDOWS)

@@ -74,7 +74,7 @@ static const virt_tab_t proc_tab[] = {
   { _VN ("sysvipc"),	 FH_PROCSYSVIPC,	virt_directory,	NULL },
   { _VN ("uptime"),	 FH_PROC,	virt_file,	format_proc_uptime },
   { _VN ("version"),	 FH_PROC,	virt_file,	format_proc_version },
-  { NULL, 0,	   	 FH_NADA,	virt_none,	NULL }
+  { NULL, 0,		 FH_NADA,	virt_none,	NULL }
 };
 
 #define PROC_DIR_COUNT 4
@@ -809,7 +809,7 @@ format_proc_cpuinfo (void *, char *&destbuf)
 					 "cpu MHz\t\t: %d.000\n",
 				 family,
 				 model,
-				 in_buf.s + strspn (in_buf.s, " 	"),
+				 in_buf.s + strspn (in_buf.s, " \t"),
 				 stepping,
 				 microcode,
 				 cpu_mhz);
@@ -1255,12 +1255,14 @@ format_proc_cpuinfo (void *, char *&destbuf)
 	  ftcprint (features1,  0, "clzero");	    /* clzero instruction */
 	  ftcprint (features1,  1, "irperf");       /* instr retired count */
 	  ftcprint (features1,  2, "xsaveerptr");   /* save/rest FP err ptrs */
+	  ftcprint (features1,  4, "rdpru");	    /* user level rd proc reg */
 /*	  ftcprint (features1,  6, "mba"); */	    /* memory BW alloc */
 	  ftcprint (features1,  9, "wbnoinvd");     /* wbnoinvd instruction */
 /*	  ftcprint (features1, 12, "ibpb" ); */	    /* ind br pred barrier */
 /*	  ftcprint (features1, 14, "ibrs" ); */	    /* ind br restricted spec */
 /*	  ftcprint (features1, 15, "stibp"); */	    /* 1 thread ind br pred */
 /*	  ftcprint (features1, 17, "stibp_always_on"); */ /* stibp always on */
+	  ftcprint (features1, 23, "amd_ppin");     /* protected proc id no */
 /*	  ftcprint (features1, 24, "ssbd"); */	    /* spec store byp dis */
 	  ftcprint (features1, 25, "virt_ssbd");    /* vir spec store byp dis */
 /*	  ftcprint (features1, 26, "ssb_no"); */    /* ssb fixed in hardware */
@@ -1345,6 +1347,7 @@ format_proc_cpuinfo (void *, char *&destbuf)
 
           ftcprint (features1,  2, "avx512_4vnniw");	   /* vec dot prod dw */
           ftcprint (features1,  3, "avx512_4fmaps");       /* vec 4 FMA single */
+          ftcprint (features1,  4, "fsrm");		   /* fast short REP MOVSB */
           ftcprint (features1,  8, "avx512_vp2intersect"); /* vec intcpt d/q */
           ftcprint (features1, 10, "md_clear");            /* verw clear buf */
           ftcprint (features1, 18, "pconfig");		   /* platform config */
@@ -1395,8 +1398,8 @@ format_proc_cpuinfo (void *, char *&destbuf)
 /*	  ftcprint (features1,  8, "invariant_tsc"); */ /* TSC invariant */
 	  ftcprint (features1,  9, "cpb");          /* core performance boost */
 	  ftcprint (features1, 10, "eff_freq_ro");  /* ro eff freq interface */
-/*	  ftcprint (features1, 11, "proc_feedback"); */ /* proc feedback if */
-/*	  ftcprint (features1, 12, "acc_power"); */ /* core power reporting */
+	  ftcprint (features1, 11, "proc_feedback");/* proc feedback if */
+	  ftcprint (features1, 12, "acc_power");    /* core power reporting */
 /*	  ftcprint (features1, 13, "connstby"); */  /* connected standby */
 /*	  ftcprint (features1, 14, "rapl"); */	    /* running average power limit */
 	}

@@ -242,7 +242,7 @@ _BEGIN_STD_C
 #endif
 
 #ifdef __moxie__
-#define _JBLEN 19
+#define _JBLEN 10
 #endif
 
 #ifdef __CRX__
