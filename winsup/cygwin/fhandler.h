@@ -14,10 +14,6 @@ details. */
 #include <cygwin/_ucred.h>
 #include <sys/un.h>
 
-/* fcntl flags used only internaly. */
-#define O_NOSYMLINK	0x080000
-#define O_DIROPEN	0x100000
-
 /* newlib used to define O_NDELAY differently from O_NONBLOCK.  Now it
    properly defines both to be the same.  Unfortunately, we have to
    behave properly the old version, too, to accommodate older executables. */
@@ -326,7 +322,7 @@ class fhandler_base
   virtual size_t &raixput () { return ra.raixput; };
   virtual size_t &rabuflen () { return ra.rabuflen; };
 
-  virtual bool get_readahead_valid () { return raixget () < ralen (); }
+  bool get_readahead_valid () { return raixget () < ralen (); }
   int puts_readahead (const char *s, size_t len = (size_t) -1);
   int put_readahead (char value);
 
@@ -335,7 +331,7 @@ class fhandler_base
 
   void set_readahead_valid (int val, int ch = -1);
 
-  virtual int get_readahead_into_buffer (char *buf, size_t buflen);
+  int get_readahead_into_buffer (char *buf, size_t buflen);
 
   bool has_acls () const { return pc.has_acls (); }
 
@@ -718,7 +714,14 @@ class fhandler_socket_wsock: public fhandler_socket
 class fhandler_socket_inet: public fhandler_socket_wsock
 {
  private:
-  bool oobinline; /* True if option SO_OOBINLINE is set */
+  bool oobinline;	/* True if option SO_OOBINLINE is set */
+  bool tcp_quickack;	/* True if quickack is enabled */
+  bool tcp_fastopen;	/* True if TCP_FASTOPEN is set on older systems */
+  int  tcp_keepidle;	/* TCP_KEEPIDLE value in secs on older systems */
+  int  tcp_keepcnt;	/* TCP_KEEPCNT value on older systems */
+  int  tcp_keepintvl;	/* TCP_KEEPINTVL value in secs on older systems */
+
+  int set_keepalive (int keepidle, int keepcnt, int keepintvl);
  protected:
   int af_local_connect () { return 0; }
 
@@ -1269,34 +1272,28 @@ public:
 
 #define CYGWIN_FIFO_PIPE_NAME_LEN     47
 
-/* The last three are the ones we try to read from. */
 enum fifo_client_connect_state
 {
   fc_unknown,
   fc_error,
   fc_disconnected,
+  fc_closing,
   fc_listening,
   fc_connected,
-  fc_closing,
   fc_input_avail,
-};
-
-enum
-{
-  FILE_PIPE_INPUT_AVAILABLE_STATE = 5
 };
 
 struct fifo_client_handler
 {
   HANDLE h;
-  fifo_client_connect_state state;
-  fifo_client_handler () : h (NULL), state (fc_unknown) {}
+  fifo_client_connect_state _state;
+  bool last_read;  /* true if our last successful read was from this client. */
+  fifo_client_handler () : h (NULL), _state (fc_unknown), last_read (false) {}
   void close () { NtClose (h); }
-/* Returns FILE_PIPE_DISCONNECTED_STATE, FILE_PIPE_LISTENING_STATE,
-   FILE_PIPE_CONNECTED_STATE, FILE_PIPE_CLOSING_STATE,
-   FILE_PIPE_INPUT_AVAILABLE_STATE, or -1 on error. */
-  fifo_client_connect_state &get_state () { return state; }
-  int pipe_state ();
+  fifo_client_connect_state get_state () const { return _state; }
+  void set_state (fifo_client_connect_state s) { _state = s; }
+  /* Query O/S.  Return previous state. */
+  fifo_client_connect_state query_and_set_state ();
 };
 
 class fhandler_fifo;
@@ -1319,12 +1316,14 @@ struct fifo_reader_id_t
   }
 };
 
-/* Info needed by all readers of a FIFO, stored in named shared memory. */
+/* Info needed by all fhandlers for a given FIFO, stored in named
+   shared memory.  This is mostly for readers, but writers need access
+   in order to update the count of open writers. */
 class fifo_shmem_t
 {
-  LONG _nreaders;
+  LONG _nreaders, _nwriters;
   fifo_reader_id_t _owner, _prev_owner, _pending_owner;
-  af_unix_spinlock_t _owner_lock, _reading_lock, _reader_opening_lock;
+  af_unix_spinlock_t _owner_lock, _reading_lock, _nreaders_lock, _nwriters_lock;
 
   /* Info about shared memory block used for temporary storage of the
      owner's fc_handler list. */
@@ -1332,8 +1331,12 @@ class fifo_shmem_t
     _sh_fc_handler_updated;
 
 public:
+  int nreaders () const { return (int) _nreaders; }
   int inc_nreaders () { return (int) InterlockedIncrement (&_nreaders); }
   int dec_nreaders () { return (int) InterlockedDecrement (&_nreaders); }
+  int nwriters () const { return (int) _nwriters; }
+  int inc_nwriters () { return (int) InterlockedIncrement (&_nwriters); }
+  int dec_nwriters () { return (int) InterlockedDecrement (&_nwriters); }
 
   fifo_reader_id_t get_owner () const { return _owner; }
   void set_owner (fifo_reader_id_t fr_id) { _owner = fr_id; }
@@ -1346,8 +1349,10 @@ public:
   void owner_unlock () { _owner_lock.unlock (); }
   void reading_lock () { _reading_lock.lock (); }
   void reading_unlock () { _reading_lock.unlock (); }
-  void reader_opening_lock () { _reader_opening_lock.lock (); }
-  void reader_opening_unlock () { _reader_opening_lock.unlock (); }
+  void nreaders_lock () { _nreaders_lock.lock (); }
+  void nreaders_unlock () { _nreaders_lock.unlock (); }
+  void nwriters_lock () { _nwriters_lock.lock (); }
+  void nwriters_unlock () { _nwriters_lock.unlock (); }
 
   int get_shared_nhandlers () const { return (int) _sh_nhandlers; }
   void set_shared_nhandlers (int n) { InterlockedExchange (&_sh_nhandlers, n); }
@@ -1373,16 +1378,13 @@ class fhandler_fifo: public fhandler_base
   HANDLE owner_needed_evt;      /* The owner is closing. */
   HANDLE owner_found_evt;       /* A new owner has taken over. */
   HANDLE update_needed_evt;     /* shared_fc_handler needs updating. */
-  HANDLE check_write_ready_evt; /* write_ready needs to be checked. */
-  HANDLE write_ready_ok_evt;    /* check_write_ready is done. */
 
   /* Handles to non-shared events needed for fifo_reader_threads. */
   HANDLE cancel_evt;            /* Signal thread to terminate. */
   HANDLE thr_sync_evt;          /* The thread has terminated. */
 
   UNICODE_STRING pipe_name;
-  WCHAR pipe_name_buf[CYGWIN_FIFO_PIPE_NAME_LEN + 1];
-  bool _maybe_eof;
+  PWCHAR pipe_name_buf;
   fifo_client_handler *fc_handler;     /* Dynamically growing array. */
   int shandlers;                       /* Size (capacity) of the array. */
   int nhandlers;                       /* Number of elements in the array. */
@@ -1407,18 +1409,26 @@ class fhandler_fifo: public fhandler_base
   void cleanup_handlers ();
   void close_all_handlers ();
   void cancel_reader_thread ();
-  void record_connection (fifo_client_handler&,
-			  fifo_client_connect_state = fc_connected);
 
-  int create_shmem ();
+  int create_shmem (bool only_open = false);
   int reopen_shmem ();
   int create_shared_fc_handler ();
   int reopen_shared_fc_handler ();
   int remap_shared_fc_handler (size_t);
 
+  int nreaders () const { return shmem->nreaders (); }
   int inc_nreaders () { return shmem->inc_nreaders (); }
   int dec_nreaders () { return shmem->dec_nreaders (); }
+  int nwriters () const { return shmem->nwriters (); }
+  int inc_nwriters () { return shmem->inc_nwriters (); }
+  int dec_nwriters () { return shmem->dec_nwriters (); }
+  void nreaders_lock () { shmem->nreaders_lock (); }
+  void nreaders_unlock () { shmem->nreaders_unlock (); }
+  void nwriters_lock () { shmem->nwriters_lock (); }
+  void nwriters_unlock () { shmem->nwriters_unlock (); }
 
+  fifo_reader_id_t get_owner () const { return shmem->get_owner (); }
+  void set_owner (fifo_reader_id_t fr_id) { shmem->set_owner (fr_id); }
   fifo_reader_id_t get_prev_owner () const { return shmem->get_prev_owner (); }
   void set_prev_owner (fifo_reader_id_t fr_id)
   { shmem->set_prev_owner (fr_id); }
@@ -1426,6 +1436,8 @@ class fhandler_fifo: public fhandler_base
   { return shmem->get_pending_owner (); }
   void set_pending_owner (fifo_reader_id_t fr_id)
   { shmem->set_pending_owner (fr_id); }
+  void owner_lock () { shmem->owner_lock (); }
+  void owner_unlock () { shmem->owner_unlock (); }
 
   void owner_needed ()
   {
@@ -1446,35 +1458,33 @@ class fhandler_fifo: public fhandler_base
   { return shmem->get_shared_fc_handler_committed (); }
   void set_shared_fc_handler_committed (size_t n)
   { shmem->set_shared_fc_handler_committed (n); }
-  int update_my_handlers (bool from_exec = false);
+  int update_my_handlers ();
   int update_shared_handlers ();
   bool shared_fc_handler_updated () const
   { return shmem->shared_fc_handler_updated (); }
   void shared_fc_handler_updated (bool val)
   { shmem->shared_fc_handler_updated (val); }
-  void check_write_ready ();
-  void reader_opening_lock () { shmem->reader_opening_lock (); }
-  void reader_opening_unlock () { shmem->reader_opening_unlock (); }
 
 public:
   fhandler_fifo ();
-  bool hit_eof ();
-  bool maybe_eof () const { return _maybe_eof; }
-  void maybe_eof (bool val) { _maybe_eof = val; }
+  ~fhandler_fifo ()
+  {
+    if (pipe_name_buf)
+      cfree (pipe_name_buf);
+  }
+  /* Called if we appear to be at EOF after polling fc_handlers. */
+  bool hit_eof () const
+  { return !nwriters () && !IsEventSignalled (writer_opening); }
   int get_nhandlers () const { return nhandlers; }
-  fifo_client_handler get_fc_handler (int i) const { return fc_handler[i]; }
+  fifo_client_handler &get_fc_handler (int i) { return fc_handler[i]; }
   PUNICODE_STRING get_pipe_name ();
   DWORD fifo_reader_thread_func ();
   void fifo_client_lock () { _fifo_client_lock.lock (); }
   void fifo_client_unlock () { _fifo_client_lock.unlock (); }
+  void record_connection (fifo_client_handler&, bool = true,
+			  fifo_client_connect_state = fc_connected);
 
-  fifo_reader_id_t get_me () const { return me; }
-  fifo_reader_id_t get_owner () const { return shmem->get_owner (); }
-  void set_owner (fifo_reader_id_t fr_id) { shmem->set_owner (fr_id); }
-  void owner_lock () { shmem->owner_lock (); }
-  void owner_unlock () { shmem->owner_unlock (); }
-
-  void take_ownership ();
+  int take_ownership (DWORD timeout = INFINITE);
   void reading_lock () { shmem->reading_lock (); }
   void reading_unlock () { shmem->reading_unlock (); }
 
@@ -1507,11 +1517,8 @@ public:
   {
     void *ptr = (void *) ccalloc (malloc_type, 1, sizeof (fhandler_fifo));
     fhandler_fifo *fhf = new (ptr) fhandler_fifo (ptr);
-    /* We don't want our client list to change any more. */
     copyto (fhf);
-    /* fhf->pipe_name_buf is a *copy* of this->pipe_name_buf, but
-       fhf->pipe_name.Buffer == this->pipe_name_buf. */
-    fhf->pipe_name.Buffer = fhf->pipe_name_buf;
+    fhf->pipe_name_buf = NULL;
     return fhf;
   }
 };
@@ -1758,6 +1765,7 @@ public:
   int close ();
   int __reg2 fstat (struct stat *buf);
   int __reg2 fstatvfs (struct statvfs *buf);
+  int rmdir ();
   DIR __reg2 *opendir (int fd);
   int __reg3 readdir (DIR *, dirent *);
   void rewinddir (DIR *);
@@ -1896,7 +1904,9 @@ class fhandler_termios: public fhandler_base
   int ioctl (int, void *);
   tty_min *_tc;
   tty *get_ttyp () {return (tty *) tc ();}
-  virtual int eat_readahead (int n);
+  int eat_readahead (int n);
+  virtual void acquire_input_mutex_if_necessary (DWORD ms) {};
+  virtual void release_input_mutex_if_necessary (void) {};
 
  public:
   tty_min*& tc () {return _tc;}
@@ -2041,8 +2051,7 @@ class dev_console
   bool raw_win32_keyboard_mode;
   char cons_rabuf[40];  // cannot get longer than char buf[40] in char_command
   char *cons_rapoi;
-  LONG xterm_mode_input;
-  LONG xterm_mode_output;
+  bool cursor_key_app_mode;
 
   inline UINT get_console_cp ();
   DWORD con_to_str (char *d, int dlen, WCHAR w);
@@ -2078,11 +2087,19 @@ public:
     input_signalled = 2,
     input_winch = 3
   };
+  struct handle_set_t
+  {
+    HANDLE input_handle;
+    HANDLE output_handle;
+    HANDLE input_mutex;
+    HANDLE output_mutex;
+  };
 private:
   static const unsigned MAX_WRITE_CHARS;
   static console_state *shared_console_info;
   static bool invisible_console;
   HANDLE input_mutex, output_mutex;
+  handle_set_t handle_set;
 
   /* Used when we encounter a truncated multi-byte sequence.  The
      lead bytes are stored here and revisited in the next write call. */
@@ -2113,7 +2130,7 @@ private:
   int input_tcsetattr (int a, const struct termios *t);
   void set_cursor_maybe ();
   static bool create_invisible_console (HWINSTA);
-  static bool create_invisible_console_workaround ();
+  static bool create_invisible_console_workaround (bool force);
   static console_state *open_shared_console (HWND, HANDLE&, bool&);
   void fix_tab_position (void);
 
@@ -2171,10 +2188,9 @@ private:
   bool send_winch_maybe ();
   void setup ();
   bool set_unit ();
-  static bool need_invisible ();
+  static bool need_invisible (bool force = false);
   static void free_console ();
   static const char *get_nonascii_key (INPUT_RECORD& input_rec, char *);
-  static DWORD get_console_process_id (DWORD pid, bool match);
 
   fhandler_console (void *) {}
 
@@ -2198,6 +2214,14 @@ private:
   void __release_input_mutex (const char *fn, int ln);
   DWORD __acquire_output_mutex (const char *fn, int ln, DWORD ms);
   void __release_output_mutex (const char *fn, int ln);
+  void acquire_input_mutex_if_necessary (DWORD ms)
+  {
+    acquire_input_mutex (ms);
+  }
+  void release_input_mutex_if_necessary (void)
+  {
+    release_input_mutex ();
+  }
 
   char *&rabuf ();
   size_t &ralen ();
@@ -2205,8 +2229,12 @@ private:
   size_t &raixput ();
   size_t &rabuflen ();
 
-  void request_xterm_mode_input (bool);
-  void request_xterm_mode_output (bool);
+  const handle_set_t *get_handle_set (void) {return &handle_set;}
+  void get_duplicated_handle_set (handle_set_t *p);
+  static void close_handle_set (handle_set_t *p);
+
+  static void request_xterm_mode_input (bool, const handle_set_t *p);
+  static void request_xterm_mode_output (bool, const handle_set_t *p);
 
   friend tty_min * tty_list::get_cttyp ();
 };
@@ -2254,45 +2282,39 @@ class fhandler_pty_common: public fhandler_termios
     return fh;
   }
 
-  bool attach_pcon_in_fork (void)
-  {
-    return get_ttyp ()->attach_pcon_in_fork;
-  }
-  DWORD get_helper_process_id (void)
-  {
-    return get_ttyp ()->helper_process_id;
-  }
-  HPCON get_pseudo_console (void)
-  {
-    return get_ttyp ()->h_pseudo_console;
-  }
-  bool to_be_read_from_pcon (void);
+  void resize_pseudo_console (struct winsize *);
+  static DWORD get_console_process_id (DWORD pid, bool match,
+				       bool cygwin = false,
+				       bool stub_only = false);
 
  protected:
-  BOOL process_opost_output (HANDLE h,
-			     const void *ptr, ssize_t& len, bool is_echo);
+  static BOOL process_opost_output (HANDLE h, const void *ptr, ssize_t& len,
+				    bool is_echo, tty *ttyp,
+				    bool is_nonblocking);
 };
 
 class fhandler_pty_slave: public fhandler_pty_common
 {
   HANDLE inuse;			// used to indicate that a tty is in use
   HANDLE output_handle_cyg, io_handle_cyg;
-  DWORD pid_restore;
-  int fd;
+  HANDLE slave_reading;
+  LONG num_reader;
 
   /* Helper functions for fchmod and fchown. */
   bool fch_open_handles (bool chown);
   int fch_set_sd (security_descriptor &sd, bool chown);
   void fch_close_handles ();
 
-  bool try_reattach_pcon ();
-  void restore_reattach_pcon ();
-
  public:
+  /* Transfer direction for transfer_input() */
+  enum xfer_dir
+  {
+    to_nat,
+    to_cyg
+  };
+
   /* Constructor */
   fhandler_pty_slave (int);
-  /* Destructor */
-  ~fhandler_pty_slave ();
 
   void set_output_handle_cyg (HANDLE h) { output_handle_cyg = h; }
   HANDLE& get_output_handle_cyg () { return output_handle_cyg; }
@@ -2304,9 +2326,6 @@ class fhandler_pty_slave: public fhandler_pty_common
   ssize_t __stdcall write (const void *ptr, size_t len);
   void __reg3 read (void *ptr, size_t& len);
   int init (HANDLE, DWORD, mode_t);
-  int eat_readahead (int n);
-  int get_readahead_into_buffer (char *buf, size_t buflen);
-  bool get_readahead_valid (void);
 
   int tcsetattr (int a, const struct termios *t);
   int tcgetattr (struct termios *t);
@@ -2343,26 +2362,44 @@ class fhandler_pty_slave: public fhandler_pty_common
     copyto (fh);
     return fh;
   }
-  void set_switch_to_pcon (int fd);
+  bool setup_pseudoconsole (bool nopcon);
+  static void close_pseudoconsole (tty *ttyp);
+  bool term_has_pcon_cap (const WCHAR *env);
+  void set_switch_to_pcon (void);
   void reset_switch_to_pcon (void);
-  void push_to_pcon_screenbuffer (const char *ptr, size_t len, bool is_echo);
-  void mask_switch_to_pcon_in (bool mask);
-  void fixup_after_attach (bool native_maybe, int fd);
-  bool is_line_input (void)
-  {
-    return get_ttyp ()->ti.c_lflag & ICANON;
-  }
+  void mask_switch_to_pcon_in (bool mask, bool xfer);
   void setup_locale (void);
-  void set_freeconsole_on_close (bool val);
-  void trigger_redraw_screen (void);
-  void wait_pcon_fwd (void);
-  void pull_pcon_input (void);
-  void update_pcon_input_state (bool need_lock);
+  tty *get_ttyp () { return (tty *) tc (); } /* Override as public */
+  void create_invisible_console (void);
+  static void transfer_input (xfer_dir dir, HANDLE from, tty *ttyp,
+			      _minor_t unit, HANDLE input_available_event);
+  HANDLE get_input_available_event (void) { return input_available_event; }
+  bool pcon_activated (void) { return get_ttyp ()->pcon_activated; }
 };
 
 #define __ptsname(buf, unit) __small_sprintf ((buf), "/dev/pty%d", (unit))
 class fhandler_pty_master: public fhandler_pty_common
 {
+public:
+  /* Parameter set for the static function pty_master_thread() */
+  struct master_thread_param_t {
+    HANDLE from_master;
+    HANDLE from_master_cyg;
+    HANDLE to_master;
+    HANDLE to_master_cyg;
+    HANDLE to_slave;
+    HANDLE to_slave_cyg;
+    HANDLE master_ctl;
+    HANDLE input_available_event;
+  };
+  /* Parameter set for the static function pty_master_fwd_thread() */
+  struct master_fwd_thread_param_t {
+    HANDLE to_master_cyg;
+    HANDLE from_slave;
+    HANDLE output_mutex;
+    tty *ttyp;
+  };
+private:
   int pktmode;			// non-zero if pty in a packet mode.
   HANDLE master_ctl;		// Control socket for handle duplication
   cygthread *master_thread;	// Master control thread
@@ -2371,14 +2408,15 @@ class fhandler_pty_master: public fhandler_pty_common
   DWORD dwProcessId;		// Owner of master handles
   HANDLE to_master_cyg, from_master_cyg;
   cygthread *master_fwd_thread;	// Master forwarding thread
+  HANDLE thread_param_copied_event;
 
 public:
   HANDLE get_echo_handle () const { return echo_r; }
   /* Constructor */
   fhandler_pty_master (int);
 
-  DWORD pty_master_thread ();
-  DWORD pty_master_fwd_thread ();
+  static DWORD pty_master_thread (const master_thread_param_t *p);
+  static DWORD pty_master_fwd_thread (const master_fwd_thread_param_t *p);
   int process_slave_output (char *buf, size_t len, int pktmode_on);
   void doecho (const void *str, DWORD len);
   int accept_input ();
@@ -2420,9 +2458,9 @@ public:
     copyto (fh);
     return fh;
   }
-
-  bool setup_pseudoconsole (void);
-  void transfer_input_to_pcon (void);
+  bool to_be_read_from_pcon (void);
+  void get_master_thread_param (master_thread_param_t *p);
+  void get_master_fwd_thread_param (master_fwd_thread_param_t *p);
 };
 
 class fhandler_dev_null: public fhandler_base
@@ -2657,6 +2695,7 @@ class fhandler_virtual : public fhandler_base
   off_t filesize;
   off_t position;
   int fileid; // unique within each class
+  bool diropen;
  public:
 
   fhandler_virtual ();

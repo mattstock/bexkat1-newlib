@@ -53,13 +53,30 @@ fhandler_console::console_state NO_COPY *fhandler_console::shared_console_info;
 
 bool NO_COPY fhandler_console::invisible_console;
 
+/* Mutex for AttachConsole()/FreeConsole() in fhandler_tty.cc */
+HANDLE NO_COPY attach_mutex;
+
+static inline void
+acquire_attach_mutex (DWORD t)
+{
+  if (attach_mutex)
+    WaitForSingleObject (attach_mutex, t);
+}
+
+static inline void
+release_attach_mutex ()
+{
+  if (attach_mutex)
+    ReleaseMutex (attach_mutex);
+}
+
 /* con_ra is shared in the same process.
    Only one console can exist in a process, therefore, static is suitable. */
 static struct fhandler_base::rabuf_t con_ra;
 
 /* Write pending buffer for ESC sequence handling
    in xterm compatible mode */
-static unsigned char last_char;
+static wchar_t last_char;
 
 /* simple helper class to accumulate output in a buffer
    and send that to the console on request: */
@@ -67,18 +84,20 @@ static class write_pending_buffer
 {
 private:
   static const size_t WPBUF_LEN = 256u;
-  unsigned char buf[WPBUF_LEN];
+  char buf[WPBUF_LEN];
   size_t ixput;
 public:
-  inline void put (unsigned char x)
+  inline void put (char x)
   {
     if (ixput < WPBUF_LEN)
       buf[ixput++] = x;
   }
   inline void empty () { ixput = 0u; }
-  inline void send (HANDLE &handle, DWORD *wn = NULL)
+  inline void send (HANDLE &handle)
   {
-    WriteConsoleA (handle, buf, ixput, wn, 0);
+    wchar_t bufw[WPBUF_LEN];
+    DWORD len = sys_mbstowcs (bufw, WPBUF_LEN, buf, ixput);
+    WriteConsoleW (handle, bufw, len, NULL, 0);
   }
 } wpbuf;
 
@@ -185,11 +204,7 @@ fhandler_console::set_unit ()
 	  tty_min_state.setntty (DEV_CONS_MAJOR, console_unit (me));
       devset = (fh_devices) shared_console_info->tty_min_state.getntty ();
       if (created)
-	{
-	  con.owner = myself->pid;
-	  con.xterm_mode_input = 0;
-	  con.xterm_mode_output = 0;
-	}
+	con.owner = myself->pid;
     }
   if (!created && shared_console_info)
     {
@@ -243,6 +258,7 @@ fhandler_console::setup ()
       con.backspace_keycode = CERASE;
       con.cons_rapoi = NULL;
       shared_console_info->tty_min_state.is_console = true;
+      con.cursor_key_app_mode = false;
     }
 }
 
@@ -276,58 +292,65 @@ fhandler_console::rabuflen ()
   return con_ra.rabuflen;
 }
 
+/* The function request_xterm_mode_{in,out}put() should be static so that
+   they can be called even after the fhandler_console instance is deleted. */
 void
-fhandler_console::request_xterm_mode_input (bool req)
+fhandler_console::request_xterm_mode_input (bool req, const handle_set_t *p)
 {
   if (con_is_legacy)
     return;
+  WaitForSingleObject (p->input_mutex, INFINITE);
+  DWORD dwMode;
+  GetConsoleMode (p->input_handle, &dwMode);
   if (req)
     {
-      if (InterlockedExchange (&con.xterm_mode_input, 1) == 0)
+      if (!(dwMode & ENABLE_VIRTUAL_TERMINAL_INPUT))
 	{
-	  DWORD dwMode;
-	  GetConsoleMode (get_handle (), &dwMode);
 	  dwMode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-	  SetConsoleMode (get_handle (), dwMode);
+	  SetConsoleMode (p->input_handle, dwMode);
+	  if (con.cursor_key_app_mode) /* Restore DECCKM */
+	    {
+	      request_xterm_mode_output (true, p);
+	      WriteConsoleW (p->output_handle, L"\033[?1h", 5, NULL, 0);
+	    }
 	}
     }
   else
     {
-      if (InterlockedExchange (&con.xterm_mode_input, 0) == 1)
+      if (dwMode & ENABLE_VIRTUAL_TERMINAL_INPUT)
 	{
-	  DWORD dwMode;
-	  GetConsoleMode (get_handle (), &dwMode);
 	  dwMode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
-	  SetConsoleMode (get_handle (), dwMode);
+	  SetConsoleMode (p->input_handle, dwMode);
 	}
     }
+  ReleaseMutex (p->input_mutex);
 }
 
 void
-fhandler_console::request_xterm_mode_output (bool req)
+fhandler_console::request_xterm_mode_output (bool req, const handle_set_t *p)
 {
   if (con_is_legacy)
     return;
+  WaitForSingleObject (p->output_mutex, INFINITE);
+  DWORD dwMode;
+  GetConsoleMode (p->output_handle, &dwMode);
   if (req)
     {
-      if (InterlockedExchange (&con.xterm_mode_output, 1) == 0)
+      if (!(dwMode & ENABLE_VIRTUAL_TERMINAL_PROCESSING))
 	{
-	  DWORD dwMode;
-	  GetConsoleMode (get_output_handle (), &dwMode);
 	  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-	  SetConsoleMode (get_output_handle (), dwMode);
+	  SetConsoleMode (p->output_handle, dwMode);
 	}
     }
   else
     {
-      if (InterlockedExchange (&con.xterm_mode_output, 0) == 1)
+      if (dwMode & ENABLE_VIRTUAL_TERMINAL_PROCESSING)
 	{
-	  DWORD dwMode;
-	  GetConsoleMode (get_output_handle (), &dwMode);
 	  dwMode &= ~ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-	  SetConsoleMode (get_output_handle (), dwMode);
+	  SetConsoleMode (p->output_handle, dwMode);
 	}
     }
+  ReleaseMutex (p->output_mutex);
 }
 
 /* Return the tty structure associated with a given tty number.  If the
@@ -400,7 +423,7 @@ dev_console::get_console_cp ()
 inline DWORD
 dev_console::str_to_con (mbtowc_p f_mbtowc, PWCHAR d, const char *s, DWORD sz)
 {
-  return sys_cp_mbstowcs (f_mbtowc, d, CONVERT_LIMIT, s, sz);
+  return _sys_mbstowcs (f_mbtowc, d, CONVERT_LIMIT, s, sz);
 }
 
 bool
@@ -416,14 +439,18 @@ fhandler_console::set_raw_win32_keyboard_mode (bool new_mode)
 void
 fhandler_console::set_cursor_maybe ()
 {
+  acquire_attach_mutex (INFINITE);
   con.fillin (get_output_handle ());
+  release_attach_mutex ();
   /* Nothing to do for xterm compatible mode. */
   if (wincap.has_con_24bit_colors () && !con_is_legacy)
     return;
   if (con.dwLastCursorPosition.X != con.b.dwCursorPosition.X ||
       con.dwLastCursorPosition.Y != con.b.dwCursorPosition.Y)
     {
+      acquire_attach_mutex (INFINITE);
       SetConsoleCursorPosition (get_output_handle (), con.b.dwCursorPosition);
+      release_attach_mutex ();
       con.dwLastCursorPosition = con.b.dwCursorPosition;
     }
 }
@@ -435,8 +462,8 @@ fhandler_console::fix_tab_position (void)
 {
   /* Re-setting ENABLE_VIRTUAL_TERMINAL_PROCESSING
      fixes the tab position. */
-  request_xterm_mode_output (false);
-  request_xterm_mode_output (true);
+  request_xterm_mode_output (false, &handle_set);
+  request_xterm_mode_output (true, &handle_set);
 }
 
 bool
@@ -501,7 +528,7 @@ fhandler_console::read (void *pv, size_t& buflen)
 
   /* if system has 24 bit color capability, use xterm compatible mode. */
   if (wincap.has_con_24bit_colors ())
-    request_xterm_mode_input (true);
+    request_xterm_mode_input (true, &handle_set);
 
   while (!input_ready && !get_cons_readahead_valid ())
     {
@@ -509,12 +536,11 @@ fhandler_console::read (void *pv, size_t& buflen)
       if ((bgres = bg_check (SIGTTIN)) <= bg_eof)
 	{
 	  buflen = bgres;
-	  if (wincap.has_con_24bit_colors ())
-	    request_xterm_mode_input (false);
 	  return;
 	}
 
       set_cursor_maybe (); /* to make cursor appear on the screen immediately */
+wait_retry:
       switch (cygwait (get_handle (), timeout))
 	{
 	case WAIT_OBJECT_0:
@@ -528,10 +554,17 @@ fhandler_console::read (void *pv, size_t& buflen)
 	case WAIT_TIMEOUT:
 	  set_sig_errno (EAGAIN);
 	  buflen = (size_t) -1;
-	  if (wincap.has_con_24bit_colors ())
-	    request_xterm_mode_input (false);
 	  return;
 	default:
+	  if (GetLastError () == ERROR_INVALID_HANDLE)
+	    { /* Confirm the handle is still valid */
+	      DWORD mode;
+	      acquire_attach_mutex (INFINITE);
+	      BOOL res = GetConsoleMode (get_handle (), &mode);
+	      release_attach_mutex ();
+	      if (res)
+		goto wait_retry;
+	    }
 	  goto err;
 	}
 
@@ -539,28 +572,34 @@ fhandler_console::read (void *pv, size_t& buflen)
 
       int ret;
       acquire_input_mutex (INFINITE);
+      acquire_attach_mutex (INFINITE);
       ret = process_input_message ();
-      release_input_mutex ();
+      release_attach_mutex ();
       switch (ret)
 	{
 	case input_error:
+	  release_input_mutex ();
 	  goto err;
 	case input_processing:
+	  release_input_mutex ();
 	  continue;
 	case input_ok: /* input ready */
 	  break;
 	case input_signalled: /* signalled */
-	  goto sig_exit;
+	  release_input_mutex ();
+	  /* The signal will be handled by cygwait() above. */
+	  continue;
 	case input_winch:
+	  release_input_mutex ();
 	  continue;
 	default:
 	  /* Should not come here */
+	  release_input_mutex ();
 	  goto err;
 	}
     }
 
   /* Check console read-ahead buffer filled from terminal requests */
-  acquire_input_mutex (INFINITE);
   while (con.cons_rapoi && *con.cons_rapoi && buflen)
     {
       buf[copied_chars++] = *con.cons_rapoi++;
@@ -577,22 +616,16 @@ fhandler_console::read (void *pv, size_t& buflen)
 #undef buf
 
   buflen = copied_chars;
-  if (wincap.has_con_24bit_colors ())
-    request_xterm_mode_input (false);
   return;
 
 err:
   __seterrno ();
   buflen = (size_t) -1;
-  if (wincap.has_con_24bit_colors ())
-    request_xterm_mode_input (false);
   return;
 
 sig_exit:
   set_sig_errno (EINTR);
   buflen = (size_t) -1;
-  if (wincap.has_con_24bit_colors ())
-    request_xterm_mode_input (false);
 }
 
 fhandler_console::input_states
@@ -955,9 +988,7 @@ fhandler_console::process_input_message (void)
       if (toadd)
 	{
 	  ssize_t ret;
-	  release_input_mutex ();
 	  line_edit_status res = line_edit (toadd, nread, *ti, &ret);
-	  acquire_input_mutex (INFINITE);
 	  if (res == line_edit_signalled)
 	    {
 	      stat = input_signalled;
@@ -975,7 +1006,9 @@ fhandler_console::process_input_message (void)
 out:
   /* Discard processed recored. */
   DWORD dummy;
-  ReadConsoleInputW (get_handle (), input_rec, min (total_read, i+1), &dummy);
+  DWORD discard_len = min (total_read, i + 1);
+  if (discard_len)
+    ReadConsoleInputW (get_handle (), input_rec, discard_len, &dummy);
   return stat;
 }
 
@@ -1101,6 +1134,7 @@ fhandler_console::open (int flags, mode_t)
       return 0;
     }
   set_handle (h);
+  handle_set.input_handle = h;
 
   h = CreateFileW (L"CONOUT$", GENERIC_READ | GENERIC_WRITE,
 		  FILE_SHARE_READ | FILE_SHARE_WRITE, &sec_none,
@@ -1112,8 +1146,11 @@ fhandler_console::open (int flags, mode_t)
       return 0;
     }
   set_output_handle (h);
+  handle_set.output_handle = h;
 
   setup_io_mutex ();
+  handle_set.input_mutex = input_mutex;
+  handle_set.output_mutex = output_mutex;
 
   if (con.fillin (get_output_handle ()))
     {
@@ -1186,8 +1223,10 @@ fhandler_console::close ()
 			      &obi, sizeof obi, NULL);
       if ((NT_SUCCESS (status) && obi.HandleCount == 1)
 	  || myself->pid == con.owner)
-	request_xterm_mode_output (false);
-      request_xterm_mode_input (false);
+	{
+	  request_xterm_mode_output (false, &handle_set);
+	  request_xterm_mode_input (false, &handle_set);
+	}
     }
 
   release_output_mutex ();
@@ -1202,18 +1241,6 @@ fhandler_console::close ()
 
   if (con_ra.rabuf)
     free (con_ra.rabuf);
-
-  /* If already attached to pseudo console, don't call free_console () */
-  cygheap_fdenum cfd (false);
-  while (cfd.next () >= 0)
-    if (cfd->get_major () == DEV_PTYM_MAJOR ||
-	cfd->get_major () == DEV_PTYS_MAJOR)
-      {
-	fhandler_pty_common *t =
-	  (fhandler_pty_common *) (fhandler_base *) cfd;
-	if (get_console_process_id (t->get_helper_process_id (), true))
-	  return 0;
-      }
 
   if (!have_execed)
     free_console ();
@@ -1232,7 +1259,9 @@ fhandler_console::ioctl (unsigned int cmd, void *arg)
       case TIOCGWINSZ:
 	int st;
 
+	acquire_attach_mutex (INFINITE);
 	st = con.fillin (get_output_handle ());
+	release_attach_mutex ();
 	if (st)
 	  {
 	    /* *not* the buffer size, the actual screen size... */
@@ -1290,12 +1319,15 @@ fhandler_console::ioctl (unsigned int cmd, void *arg)
 	  DWORD n;
 	  int ret = 0;
 	  INPUT_RECORD inp[INREC_SIZE];
+	  acquire_attach_mutex (INFINITE);
 	  if (!PeekConsoleInputW (get_handle (), inp, INREC_SIZE, &n))
 	    {
 	      set_errno (EINVAL);
+	      release_attach_mutex ();
 	      release_output_mutex ();
 	      return -1;
 	    }
+	  release_attach_mutex ();
 	  bool saw_eol = false;
 	  for (DWORD i=0; i<n; i++)
 	    if (inp[i].EventType == KEY_EVENT &&
@@ -1346,11 +1378,13 @@ fhandler_console::tcflush (int queue)
   if (queue == TCIFLUSH
       || queue == TCIOFLUSH)
     {
+      acquire_attach_mutex (INFINITE);
       if (!FlushConsoleInputBuffer (get_handle ()))
 	{
 	  __seterrno ();
 	  res = -1;
 	}
+      release_attach_mutex ();
     }
   return res;
 }
@@ -1361,11 +1395,17 @@ fhandler_console::output_tcsetattr (int, struct termios const *t)
   /* All the output bits we can ignore */
 
   acquire_output_mutex (INFINITE);
-  if (wincap.has_con_24bit_colors ())
-    request_xterm_mode_output (false);
   DWORD flags = ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT;
 
+  DWORD oflags;
+  acquire_attach_mutex (INFINITE);
+  GetConsoleMode (get_output_handle (), &oflags);
+  if (wincap.has_con_24bit_colors () && !con_is_legacy
+      && (oflags & ENABLE_VIRTUAL_TERMINAL_PROCESSING))
+    flags |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+
   int res = SetConsoleMode (get_output_handle (), flags) ? 0 : -1;
+  release_attach_mutex ();
   if (res)
     __seterrno_from_win_error (GetLastError ());
   release_output_mutex ();
@@ -1383,6 +1423,7 @@ fhandler_console::input_tcsetattr (int, struct termios const *t)
 
   DWORD oflags;
 
+  acquire_attach_mutex (INFINITE);
   if (!GetConsoleMode (get_handle (), &oflags))
     oflags = 0;
   DWORD flags = 0;
@@ -1426,6 +1467,10 @@ fhandler_console::input_tcsetattr (int, struct termios const *t)
     ((wincap.has_con_24bit_colors () && !con_is_legacy) ?
      0 : ENABLE_MOUSE_INPUT);
 
+  if (wincap.has_con_24bit_colors () && !con_is_legacy
+      && (oflags & ENABLE_VIRTUAL_TERMINAL_INPUT))
+    flags |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+
   int res;
   if (flags == oflags)
     res = 0;
@@ -1437,6 +1482,7 @@ fhandler_console::input_tcsetattr (int, struct termios const *t)
       syscall_printf ("%d = tcsetattr(,%p) enable flags %y, c_lflag %y iflag %y",
 		      res, t, flags, t->c_lflag, t->c_iflag);
     }
+  release_attach_mutex ();
 
   get_ttyp ()->rstcons (false);
   release_input_mutex ();
@@ -1462,6 +1508,7 @@ fhandler_console::tcgetattr (struct termios *t)
 
   DWORD flags;
 
+  acquire_attach_mutex (INFINITE);
   if (!GetConsoleMode (get_handle (), &flags))
     {
       __seterrno ();
@@ -1486,6 +1533,7 @@ fhandler_console::tcgetattr (struct termios *t)
       /* All the output bits we can ignore */
       res = 0;
     }
+  release_attach_mutex ();
   syscall_printf ("%d = tcgetattr(%p) enable flags %y, t->lflag %y, t->iflag %y",
 		 res, t, flags, t->c_lflag, t->c_iflag);
   return res;
@@ -1802,6 +1850,9 @@ fhandler_console::write_console (PWCHAR buf, DWORD len, DWORD& done)
       if (buf[i] >= (unsigned char) '`' && buf[i] <= (unsigned char) '~')
 	buf[i] = __vt100_conv[buf[i] - (unsigned char) '`'];
 
+  if (len > 0)
+    last_char = buf[len-1];
+
   while (len > 0)
     {
       DWORD nbytes = len > MAX_WRITE_CHARS ? MAX_WRITE_CHARS : len;
@@ -2010,6 +2061,7 @@ fhandler_console::char_command (char c)
 {
   int x, y, n;
   char buf[40];
+  wchar_t bufw[40];
   int r, g, b;
 
   if (wincap.has_con_24bit_colors () && !con_is_legacy)
@@ -2044,9 +2096,9 @@ fhandler_console::char_command (char c)
 	  if (wincap.has_con_esc_rep ())
 	    /* Just send the sequence */
 	    wpbuf.send (get_output_handle ());
-	  else if (last_char && last_char != '\n')
+	  else if (last_char && last_char != L'\n')
 	    for (int i = 0; i < con.args[0]; i++)
-	      WriteConsoleA (get_output_handle (), &last_char, 1, 0, 0);
+	      WriteConsoleW (get_output_handle (), &last_char, 1, 0, 0);
 	  break;
 	case 'r': /* DECSTBM */
 	  con.scroll_region.Top = con.args[0] ? con.args[0] - 1 : 0;
@@ -2067,25 +2119,25 @@ fhandler_console::char_command (char c)
 		{
 		  /* Erase scroll down area */
 		  n = con.args[0] ? : 1;
-		  __small_sprintf (buf, "\033[%d;1H\033[J\033[%d;%dH",
-				   srBottom - (n-1) - con.b.srWindow.Top + 1,
-				   y + 1 - con.b.srWindow.Top, x + 1);
-		  WriteConsoleA (get_output_handle (),
-				 buf, strlen (buf), 0, 0);
+		  __small_swprintf (bufw, L"\033[%d;1H\033[J\033[%d;%dH",
+				    srBottom - (n-1) - con.b.srWindow.Top + 1,
+				    y + 1 - con.b.srWindow.Top, x + 1);
+		  WriteConsoleW (get_output_handle (),
+				 bufw, wcslen (bufw), 0, 0);
 		}
-	      __small_sprintf (buf, "\033[%d;%dr",
-			       y + 1 - con.b.srWindow.Top,
-			       srBottom + 1 - con.b.srWindow.Top);
-	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      __small_swprintf (bufw, L"\033[%d;%dr",
+				y + 1 - con.b.srWindow.Top,
+				srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleW (get_output_handle (), bufw, wcslen (bufw), 0, 0);
 	      wpbuf.put ('T');
 	      wpbuf.send (get_output_handle ());
-	      __small_sprintf (buf, "\033[%d;%dr",
-			       srTop + 1 - con.b.srWindow.Top,
-			       srBottom + 1 - con.b.srWindow.Top);
-	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
-	      __small_sprintf (buf, "\033[%d;%dH",
-			       y + 1 - con.b.srWindow.Top, x + 1);
-	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      __small_swprintf (bufw, L"\033[%d;%dr",
+				srTop + 1 - con.b.srWindow.Top,
+				srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleW (get_output_handle (), bufw, wcslen (bufw), 0, 0);
+	      __small_swprintf (bufw, L"\033[%d;%dH",
+				y + 1 - con.b.srWindow.Top, x + 1);
+	      WriteConsoleW (get_output_handle (), bufw, wcslen (bufw), 0, 0);
 	    }
 	  else
 	    {
@@ -2101,19 +2153,19 @@ fhandler_console::char_command (char c)
 	      cursor_get (&x, &y);
 	      if (y < srTop || y > srBottom)
 		break;
-	      __small_sprintf (buf, "\033[%d;%dr",
-			       y + 1 - con.b.srWindow.Top,
-			       srBottom + 1 - con.b.srWindow.Top);
-	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      __small_swprintf (bufw, L"\033[%d;%dr",
+				y + 1 - con.b.srWindow.Top,
+				srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleW (get_output_handle (), bufw, wcslen (bufw), 0, 0);
 	      wpbuf.put ('S');
 	      wpbuf.send (get_output_handle ());
-	      __small_sprintf (buf, "\033[%d;%dr",
-			       srTop + 1 - con.b.srWindow.Top,
-			       srBottom + 1 - con.b.srWindow.Top);
-	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
-	      __small_sprintf (buf, "\033[%d;%dH",
-			       y + 1 - con.b.srWindow.Top, x + 1);
-	      WriteConsoleA (get_output_handle (), buf, strlen (buf), 0, 0);
+	      __small_swprintf (bufw, L"\033[%d;%dr",
+				srTop + 1 - con.b.srWindow.Top,
+				srBottom + 1 - con.b.srWindow.Top);
+	      WriteConsoleW (get_output_handle (), bufw, wcslen (bufw), 0, 0);
+	      __small_swprintf (bufw, L"\033[%d;%dH",
+				y + 1 - con.b.srWindow.Top, x + 1);
+	      WriteConsoleW (get_output_handle (), bufw, wcslen (bufw), 0, 0);
 	    }
 	  else
 	    {
@@ -2150,10 +2202,6 @@ fhandler_console::char_command (char c)
 	  break;
 	case 'h': /* DECSET */
 	case 'l': /* DECRST */
-	  if (c == 'h')
-	    con.screen_alternated = true;
-	  else
-	    con.screen_alternated = false;
 	  wpbuf.put (c);
 	  /* Just send the sequence */
 	  wpbuf.send (get_output_handle ());
@@ -2161,8 +2209,15 @@ fhandler_console::char_command (char c)
 	    {
 	      bool need_fix_tab_position = false;
 	      for (int i = 0; i < con.nargs; i++)
-		if (con.args[i] == 1049)
-		  need_fix_tab_position = true;
+		{
+		  if (con.args[i] == 1049)
+		    {
+		      con.screen_alternated = (c == 'h');
+		      need_fix_tab_position = true;
+		    }
+		  if (con.args[i] == 1) /* DECCKM */
+		    con.cursor_key_app_mode = (c == 'h');
+		}
 	      /* Call fix_tab_position() if screen has been alternated. */
 	      if (need_fix_tab_position)
 		fix_tab_position ();
@@ -2174,7 +2229,16 @@ fhandler_console::char_command (char c)
 	      con.scroll_region.Top = 0;
 	      con.scroll_region.Bottom = -1;
 	      con.savex = con.savey = -1;
+	      con.cursor_key_app_mode = false;
 	    }
+	  wpbuf.put (c);
+	  /* Just send the sequence */
+	  wpbuf.send (get_output_handle ());
+	  break;
+	case 'm':
+	  if (con.saw_greater_than_sign)
+	    break; /* Ignore unsupported CSI > Pm m */
+	  /* Text attribute settings */
 	  wpbuf.put (c);
 	  /* Just send the sequence */
 	  wpbuf.send (get_output_handle ());
@@ -2750,7 +2814,7 @@ fhandler_console::write_normal (const unsigned char *src,
   DWORD done;
   DWORD buf_len;
   const unsigned char *found = src;
-  size_t ret;
+  int ret;
   mbstate_t ps;
   mbtowc_p f_mbtowc;
 
@@ -2835,7 +2899,6 @@ fhandler_console::write_normal (const unsigned char *src,
 	  break;
 	default:
 	  found += ret;
-	  last_char = *(found - 1);
 	  break;
 	}
     }
@@ -2930,7 +2993,7 @@ do_print:
 		{
 		  ret = __utf8_mbtowc (_REENT, NULL, (const char *) found + 1,
 				       end - found - 1, &ps);
-		  if (ret != (size_t) -1)
+		  if (ret != -1)
 		    while (ret-- > 0)
 		      {
 			WCHAR w = *(found + 1);
@@ -2960,12 +3023,13 @@ fhandler_console::write (const void *vsrc, size_t len)
   if (bg <= bg_eof)
     return (ssize_t) bg;
 
+  acquire_attach_mutex (INFINITE);
   push_process_state process_state (PID_TTYOU);
   acquire_output_mutex (INFINITE);
 
   /* If system has 24 bit color capability, use xterm compatible mode. */
   if (wincap.has_con_24bit_colors ())
-    request_xterm_mode_output (true);
+    request_xterm_mode_output (true, &handle_set);
   if (wincap.has_con_24bit_colors () && !con_is_legacy)
     {
       DWORD dwMode;
@@ -3053,12 +3117,12 @@ fhandler_console::write (const void *vsrc, size_t len)
 		      && srBottom == con.b.srWindow.Bottom)
 		    {
 		      /* Erase scroll down area */
-		      char buf[] = "\033[32768;1H\033[J\033[32768;32768";
-		      __small_sprintf (buf, "\033[%d;1H\033[J\033[%d;%dH",
-				       srBottom - con.b.srWindow.Top + 1,
-				       y + 1 - con.b.srWindow.Top, x + 1);
-		      WriteConsoleA (get_output_handle (),
-				     buf, strlen (buf), 0, 0);
+		      wchar_t buf[] = L"\033[32768;1H\033[J\033[32768;32768";
+		      __small_swprintf (buf, L"\033[%d;1H\033[J\033[%d;%dH",
+					srBottom - con.b.srWindow.Top + 1,
+					y + 1 - con.b.srWindow.Top, x + 1);
+		      WriteConsoleW (get_output_handle (),
+				     buf, wcslen (buf), 0, 0);
 		    }
 		  /* Substitute "CSI Ps T" */
 		  wpbuf.put ('[');
@@ -3070,6 +3134,13 @@ fhandler_console::write (const void *vsrc, size_t len)
 	      con.state = normal;
 	      wpbuf.empty();
 	    }
+	  else if (*src == ']')		/* OSC Operating System Command */
+	    {
+	      wpbuf.put (*src);
+	      con.rarg = 0;
+	      con.my_title_buf[0] = '\0';
+	      con.state = gotrsquare;
+	    }
 	  else if (wincap.has_con_24bit_colors () && !con_is_legacy)
 	    {
 	      if (*src == 'c') /* RIS Full reset */
@@ -3077,6 +3148,7 @@ fhandler_console::write (const void *vsrc, size_t len)
 		  con.scroll_region.Top = 0;
 		  con.scroll_region.Bottom = -1;
 		  con.savex = con.savey = -1;
+		  con.cursor_key_app_mode = false;
 		}
 	      /* ESC sequences below (e.g. OSC, etc) are left to xterm
 		 emulation in xterm compatible mode, therefore, are not
@@ -3086,13 +3158,6 @@ fhandler_console::write (const void *vsrc, size_t len)
 	      wpbuf.send (get_output_handle ());
 	      con.state = normal;
 	      wpbuf.empty();
-	    }
-	  else if (*src == ']')		/* OSC Operating System Command */
-	    {
-	      wpbuf.put (*src);
-	      con.rarg = 0;
-	      con.my_title_buf[0] = '\0';
-	      con.state = gotrsquare;
 	    }
 	  else if (*src == '(')		/* Designate G0 character set */
 	    {
@@ -3171,7 +3236,8 @@ fhandler_console::write (const void *vsrc, size_t len)
 	    con.rarg = con.rarg * 10 + (*src - '0');
 	  else if (*src == ';' && (con.rarg == 2 || con.rarg == 0))
 	    con.state = gettitle;
-	  else if (*src == ';' && (con.rarg == 4 || con.rarg == 104))
+	  else if (*src == ';' && (con.rarg == 4 || con.rarg == 104
+				   || (con.rarg >= 10 && con.rarg <= 19)))
 	    con.state = eatpalette;
 	  else
 	    con.state = eattitle;
@@ -3181,10 +3247,13 @@ fhandler_console::write (const void *vsrc, size_t len)
 	case eattitle:
 	case gettitle:
 	  {
+	    wpbuf.put (*src);
 	    int n = strlen (con.my_title_buf);
 	    if (*src < ' ')
 	      {
-		if (*src == '\007' && con.state == gettitle)
+		if (wincap.has_con_24bit_colors () && !con_is_legacy)
+		  wpbuf.send (get_output_handle ());
+		else if (*src == '\007' && con.state == gettitle)
 		  set_console_title (con.my_title_buf);
 		con.state = normal;
 		wpbuf.empty();
@@ -3193,27 +3262,37 @@ fhandler_console::write (const void *vsrc, size_t len)
 	      {
 		con.my_title_buf[n++] = *src;
 		con.my_title_buf[n] = '\0';
-		wpbuf.put (*src);
 	      }
 	    src++;
 	    break;
 	  }
 	case eatpalette:
-	  if (*src == '\033')
-	    {
-	      wpbuf.put (*src);
-	      con.state = endpalette;
-	    }
+	  wpbuf.put (*src);
+	  if (*src == '?')
+	    con.saw_question_mark = true;
+	  else if (*src == '\033')
+	    con.state = endpalette;
 	  else if (*src == '\a')
 	    {
+	      /* Send OSC Ps; Pt BEL other than OSC Ps; ? BEL */
+	      if (wincap.has_con_24bit_colors () && !con_is_legacy
+		  && !con.saw_question_mark)
+		wpbuf.send (get_output_handle ());
 	      con.state = normal;
 	      wpbuf.empty();
 	    }
 	  src++;
 	  break;
 	case endpalette:
+	  wpbuf.put (*src);
 	  if (*src == '\\')
-	    con.state = normal;
+	    {
+	      /* Send OSC Ps; Pt ST other than OSC Ps; ? ST */
+	      if (wincap.has_con_24bit_colors () && !con_is_legacy
+		  && !con.saw_question_mark)
+		wpbuf.send (get_output_handle ());
+	      con.state = normal;
+	    }
 	  else
 	    /* Sequence error (abort) */
 	    con.state = normal;
@@ -3270,6 +3349,7 @@ fhandler_console::write (const void *vsrc, size_t len)
 
   syscall_printf ("%ld = fhandler_console::write(...)", len);
 
+  release_attach_mutex ();
   return len;
 }
 
@@ -3441,12 +3521,13 @@ fhandler_console::create_invisible_console (HWINSTA horig)
    function is currently only called at startup and during exec, it shouldn't
    be a big deal.  */
 bool
-fhandler_console::create_invisible_console_workaround ()
+fhandler_console::create_invisible_console_workaround (bool force)
 {
-  if (!AttachConsole (-1))
+  /* If force is set, avoid to reattach to existing console. */
+  if (force || !AttachConsole (-1))
     {
       bool taskbar;
-      DWORD err = GetLastError ();
+      DWORD err = force ? 0 : GetLastError ();
       path_conv helper ("/bin/cygwin-console-helper.exe");
       HANDLE hello = NULL;
       HANDLE goodbye = NULL;
@@ -3531,10 +3612,12 @@ fhandler_console::free_console ()
 }
 
 bool
-fhandler_console::need_invisible ()
+fhandler_console::need_invisible (bool force)
 {
   BOOL b = false;
-  if (exists ())
+  /* If force is set, forcibly create a new invisible console
+     even if a console device already exists. */
+  if (exists () && !force)
     invisible_console = false;
   else
     {
@@ -3572,44 +3655,13 @@ fhandler_console::need_invisible ()
 	  invisible_console = true;
 	}
       else if (wincap.has_broken_alloc_console ())
-	b = create_invisible_console_workaround ();
+	b = create_invisible_console_workaround (force);
       else
 	b = create_invisible_console (h);
     }
 
   debug_printf ("invisible_console %d", invisible_console);
   return b;
-}
-
-DWORD
-fhandler_console::get_console_process_id (DWORD pid, bool match)
-{
-  DWORD tmp;
-  DWORD num, num_req;
-  num = 1;
-  num_req = GetConsoleProcessList (&tmp, num);
-  DWORD *list;
-  while (true)
-    {
-      list = (DWORD *)
-	HeapAlloc (GetProcessHeap (), 0, num_req * sizeof (DWORD));
-      num = num_req;
-      num_req = GetConsoleProcessList (list, num);
-      if (num_req > num)
-	HeapFree (GetProcessHeap (), 0, list);
-      else
-	break;
-    }
-  num = num_req;
-
-  tmp = 0;
-  for (DWORD i=0; i<num; i++)
-    if ((match && list[i] == pid) || (!match && list[i] != pid))
-      /* Last one is the oldest. */
-      /* https://github.com/microsoft/terminal/issues/95 */
-      tmp = list[i];
-  HeapFree (GetProcessHeap (), 0, list);
-  return tmp;
 }
 
 DWORD
@@ -3664,4 +3716,36 @@ fhandler_console::__release_output_mutex (const char *fn, int ln)
 #ifdef DEBUGGING
   strace.prntf (_STRACE_TERMIOS, fn, "(%d): release output_mutex", ln);
 #endif
+}
+
+void
+fhandler_console::get_duplicated_handle_set (handle_set_t *p)
+{
+  DuplicateHandle (GetCurrentProcess (), get_handle (),
+		   GetCurrentProcess (), &p->input_handle,
+		   0, FALSE, DUPLICATE_SAME_ACCESS);
+  DuplicateHandle (GetCurrentProcess (), get_output_handle (),
+		   GetCurrentProcess (), &p->output_handle,
+		   0, FALSE, DUPLICATE_SAME_ACCESS);
+  DuplicateHandle (GetCurrentProcess (), input_mutex,
+		   GetCurrentProcess (), &p->input_mutex,
+		   0, FALSE, DUPLICATE_SAME_ACCESS);
+  DuplicateHandle (GetCurrentProcess (), output_mutex,
+		   GetCurrentProcess (), &p->output_mutex,
+		   0, FALSE, DUPLICATE_SAME_ACCESS);
+}
+
+/* The function close_handle_set() should be static so that they can
+   be called even after the fhandler_console instance is deleted. */
+void
+fhandler_console::close_handle_set (handle_set_t *p)
+{
+  CloseHandle (p->input_handle);
+  p->input_handle = NULL;
+  CloseHandle (p->output_handle);
+  p->output_handle = NULL;
+  CloseHandle (p->input_mutex);
+  p->input_mutex = NULL;
+  CloseHandle (p->output_mutex);
+  p->output_mutex = NULL;
 }

@@ -33,7 +33,8 @@ fhandler_termios::tcinit (bool is_pty_master)
       tc ()->ti.c_iflag = BRKINT | ICRNL | IXON | IUTF8;
       tc ()->ti.c_oflag = OPOST | ONLCR;
       tc ()->ti.c_cflag = B38400 | CS8 | CREAD;
-      tc ()->ti.c_lflag = ISIG | ICANON | ECHO | IEXTEN;
+      tc ()->ti.c_lflag = ISIG | ICANON | ECHO | IEXTEN
+	| ECHOE | ECHOK | ECHOCTL | ECHOKE;
 
       tc ()->ti.c_cc[VDISCARD]	= CFLUSH;
       tc ()->ti.c_cc[VEOL]	= CEOL;
@@ -91,7 +92,7 @@ fhandler_termios::tcsetpgrp (const pid_t pgid)
 	  if (_my_tls.call_signal_handler ())
 	    continue;
 	  set_errno (EINTR);
-	  /* fall through intentionally */
+	  fallthrough;
 	default:
 	  res = -1;
 	  break;
@@ -267,25 +268,25 @@ fhandler_termios::eat_readahead (int n)
 {
   int oralen = ralen ();
   if (n < 0)
-    n = ralen ();
-  if (n > 0 && ralen () > 0)
+    n = ralen () - raixget ();
+  if (n > 0 && ralen () > raixget ())
     {
-      if ((int) (ralen () -= n) < 0)
-	ralen () = 0;
+      if ((int) (ralen () -= n) < (int) raixget ())
+	ralen () = raixget ();
       /* If IUTF8 is set, the terminal is in UTF-8 mode.  If so, we erase
 	 a complete UTF-8 multibyte sequence on VERASE/VWERASE.  Otherwise,
 	 if we only erase a single byte, invalid unicode chars are left in
 	 the input. */
       if (tc ()->ti.c_iflag & IUTF8)
-	while (ralen () > 0 &&
+	while (ralen () > raixget () &&
 	       ((unsigned char) rabuf ()[ralen ()] & 0xc0) == 0x80)
 	  --ralen ();
-
-      if (raixget () >= ralen ())
-	raixget () = raixput () = ralen () = 0;
-      else if (raixput () > ralen ())
-	raixput () = ralen ();
     }
+  oralen = oralen - ralen ();
+  if (raixget () >= ralen ())
+    raixget () = raixput () = ralen () = 0;
+  else if (raixput () > ralen ())
+    raixput () = ralen ();
 
   return oralen;
 }
@@ -331,7 +332,9 @@ fhandler_termios::line_edit (const char *rptr, size_t nread, termios& ti,
 
 	  termios_printf ("got interrupt %d, sending signal %d", c, sig);
 	  eat_readahead (-1);
+	  release_input_mutex_if_necessary ();
 	  tc ()->kill_pgrp (sig);
+	  acquire_input_mutex_if_necessary (INFINITE);
 	  ti.c_lflag &= ~FLUSHO;
 	  sawsig = true;
 	  goto restart_output;

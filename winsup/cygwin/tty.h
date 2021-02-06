@@ -21,6 +21,7 @@ details. */
 #define OUTPUT_MUTEX		"cygtty.output.mutex"
 #define INPUT_MUTEX		"cygtty.input.mutex"
 #define TTY_SLAVE_ALIVE		"cygtty.slave_alive"
+#define TTY_SLAVE_READING	"cygtty.slave_reading"
 
 #include <sys/termios.h>
 
@@ -93,34 +94,40 @@ private:
   HANDLE _from_master_cyg;
   HANDLE _to_master;
   HANDLE _to_master_cyg;
-  HPCON h_pseudo_console;
-  HANDLE h_helper_process;
-  DWORD helper_process_id;
-  HANDLE h_helper_goodbye;
-  bool attach_pcon_in_fork;
+  HANDLE _to_slave;
+  HANDLE _to_slave_cyg;
+  bool pcon_activated;
+  bool pcon_start;
   bool switch_to_pcon_in;
-  bool switch_to_pcon_out;
-  bool screen_alternated;
-  bool mask_switch_to_pcon_in;
   pid_t pcon_pid;
-  int num_pcon_attached_slaves;
   UINT term_code_page;
-  bool need_redraw_screen;
-  HANDLE fwd_done;
   DWORD pcon_last_time;
-  bool pcon_in_empty;
-  bool req_transfer_input_to_pcon;
-  bool req_flush_pcon_input;
+  HANDLE h_pcon_write_pipe;
+  HANDLE h_pcon_condrv_reference;
+  HANDLE h_pcon_conhost_process;
+  HANDLE h_pcon_in;
+  HANDLE h_pcon_out;
+  bool pcon_cap_checked;
+  bool has_csi6n;
+  bool need_invisible_console;
+  pid_t invisible_console_pid;
+  UINT previous_code_page;
+  UINT previous_output_code_page;
+  bool master_is_running_as_service;
 
 public:
   HANDLE from_master () const { return _from_master; }
   HANDLE from_master_cyg () const { return _from_master_cyg; }
   HANDLE to_master () const { return _to_master; }
   HANDLE to_master_cyg () const { return _to_master_cyg; }
+  HANDLE to_slave () const { return _to_slave; }
+  HANDLE to_slave_cyg () const { return _to_slave_cyg; }
   void set_from_master (HANDLE h) { _from_master = h; }
   void set_from_master_cyg (HANDLE h) { _from_master_cyg = h; }
   void set_to_master (HANDLE h) { _to_master = h; }
   void set_to_master_cyg (HANDLE h) { _to_master_cyg = h; }
+  void set_to_slave (HANDLE h) { _to_slave = h; }
+  void set_to_slave_cyg (HANDLE h) { _to_slave_cyg = h; }
 
   int read_retval;
   bool was_opened;	/* True if opened at least once. */
@@ -140,6 +147,7 @@ public:
   void set_master_ctl_closed () {master_pid = -1;}
   static void __stdcall create_master (int);
   static void __stdcall init_session ();
+  void wait_pcon_fwd (bool init = true);
   friend class fhandler_pty_common;
   friend class fhandler_pty_master;
   friend class fhandler_pty_slave;

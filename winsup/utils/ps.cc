@@ -6,7 +6,6 @@ This software is a copyrighted work licensed under the terms of the
 Cygwin license.  Please consult the file "CYGWIN_LICENSE" for
 details. */
 
-#define PMEM_EXTENDED_PARAMETER PVOID
 #include <errno.h>
 #include <stdio.h>
 #include <locale.h>
@@ -103,7 +102,7 @@ ttynam (int ntty, char buf[9])
   return buf;
 }
 
-static void
+static void __attribute__ ((__noreturn__))
 usage (FILE * stream, int status)
 {
   fprintf (stream, "\

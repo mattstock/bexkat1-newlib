@@ -194,6 +194,24 @@ handle (int fd, bool writing)
   return h;
 }
 
+static bool
+is_console_app (WCHAR *filename)
+{
+  HANDLE h;
+  const int id_offset = 92;
+  h = CreateFileW (filename, GENERIC_READ, FILE_SHARE_READ,
+		  NULL, OPEN_EXISTING, 0, NULL);
+  char buf[1024];
+  DWORD n;
+  ReadFile (h, buf, sizeof (buf), &n, 0);
+  CloseHandle (h);
+  char *p = (char *) memmem (buf, n, "PE\0\0", 4);
+  if (p && p + id_offset <= buf + n)
+    return p[id_offset] == '\003'; /* 02: GUI, 03: console */
+  else
+    return false;
+}
+
 int
 iscmd (const char *argv0, const char *what)
 {
@@ -252,6 +270,8 @@ struct system_call_handle
 
 child_info_spawn NO_COPY ch_spawn;
 
+extern "C" void __posix_spawn_sem_release (void *sem, int error);
+
 int
 child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 			  const char *const envp[], int mode,
@@ -259,8 +279,6 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 {
   bool rc;
   int res = -1;
-  DWORD pid_restore = 0;
-  bool attach_to_console = false;
   pid_t ctty_pgid = 0;
 
   /* Search for CTTY and retrieve its PGID */
@@ -412,6 +430,13 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
       sigproc_printf ("priority class %d", c_flags);
 
       c_flags |= CREATE_SEPARATE_WOW_VDM | CREATE_UNICODE_ENVIRONMENT;
+
+      /* Add CREATE_DEFAULT_ERROR_MODE flag for non-Cygwin processes so they
+	 get the default error mode instead of inheriting the mode Cygwin
+	 uses.  This allows things like Windows Error Reporting/JIT debugging
+	 to work with processes launched from a Cygwin shell. */
+      if (!real_path.iscygexec ())
+	c_flags |= CREATE_DEFAULT_ERROR_MODE;
 
       /* We're adding the CREATE_BREAKAWAY_FROM_JOB flag here to workaround
 	 issues with the "Program Compatibility Assistant (PCA) Service".
@@ -580,9 +605,8 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 			 PROCESS_QUERY_LIMITED_INFORMATION))
 	sa = &sec_none_nih;
 
-      /* Attach to pseudo console if pty salve is used */
-      pid_restore = fhandler_console::get_console_process_id
-	(GetCurrentProcessId (), false);
+      fhandler_pty_slave *ptys_primary = NULL;
+      fhandler_console *cons_native = NULL;
       for (int i = 0; i < 3; i ++)
 	{
 	  const int chk_order[] = {1, 0, 2};
@@ -591,34 +615,76 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  if (fh && fh->get_major () == DEV_PTYS_MAJOR)
 	    {
 	      fhandler_pty_slave *ptys = (fhandler_pty_slave *) fh;
-	      if (ptys->get_pseudo_console ())
-		{
-		  DWORD helper_process_id = ptys->get_helper_process_id ();
-		  debug_printf ("found a PTY slave %d: helper_PID=%d",
-				    fh->get_minor (), helper_process_id);
-		  if (fhandler_console::get_console_process_id
-					      (helper_process_id, true))
-		    /* Already attached */
-		    attach_to_console = true;
-		  else if (!attach_to_console)
-		    {
-		      FreeConsole ();
-		      if (AttachConsole (helper_process_id))
-			attach_to_console = true;
-		    }
-		  ptys->fixup_after_attach (!iscygwin (), fd);
-		  if (mode == _P_OVERLAY)
-		    ptys->set_freeconsole_on_close (iscygwin ());
-		}
+	      if (ptys_primary == NULL)
+		ptys_primary = ptys;
 	    }
 	  else if (fh && fh->get_major () == DEV_CONS_MAJOR)
 	    {
-	      attach_to_console = true;
 	      fhandler_console *cons = (fhandler_console *) fh;
 	      if (wincap.has_con_24bit_colors () && !iscygwin ())
-		if (fd == 1 || fd == 2)
-		  cons->request_xterm_mode_output (false);
+		{
+		  if (cons_native == NULL)
+		    cons_native = cons;
+		  if (fd == 0)
+		    fhandler_console::request_xterm_mode_input (false,
+						cons->get_handle_set ());
+		  else if (fd == 1 || fd == 2)
+		    fhandler_console::request_xterm_mode_output (false,
+						 cons->get_handle_set ());
+		}
 	    }
+	}
+      struct fhandler_console::handle_set_t cons_handle_set = { 0, };
+      if (cons_native)
+	/* Console handles will be closed by close_all_files(),
+	   therefore, duplicate them here */
+	cons_native->get_duplicated_handle_set (&cons_handle_set);
+
+      if (!iscygwin ())
+	{
+	  cfd.rewind ();
+	  while (cfd.next () >= 0)
+	    if (cfd->get_major () == DEV_PTYS_MAJOR)
+	      {
+		fhandler_pty_slave *ptys =
+		  (fhandler_pty_slave *)(fhandler_base *) cfd;
+		ptys->create_invisible_console ();
+		ptys->setup_locale ();
+	      }
+	}
+
+      bool enable_pcon = false;
+      HANDLE ptys_from_master = NULL;
+      HANDLE ptys_input_available_event = NULL;
+      HANDLE ptys_output_mutex = NULL;
+      tty *ptys_ttyp = NULL;
+      _minor_t ptys_unit = 0;
+      if (!iscygwin () && ptys_primary && is_console_app (runpath))
+	{
+	  bool nopcon = mode != _P_OVERLAY && mode != _P_WAIT;
+	  if (disable_pcon || !ptys_primary->term_has_pcon_cap (envblock))
+	    nopcon = true;
+	  if (ptys_primary->setup_pseudoconsole (nopcon))
+	    enable_pcon = true;
+	  ptys_ttyp = ptys_primary->get_ttyp ();
+	  ptys_unit = ptys_primary->get_minor ();
+	  ptys_from_master = ptys_primary->get_handle ();
+	  DuplicateHandle (GetCurrentProcess (), ptys_from_master,
+			   GetCurrentProcess (), &ptys_from_master,
+			   0, 0, DUPLICATE_SAME_ACCESS);
+	  ptys_input_available_event =
+	    ptys_primary->get_input_available_event ();
+	  DuplicateHandle (GetCurrentProcess (), ptys_input_available_event,
+			   GetCurrentProcess (), &ptys_input_available_event,
+			   0, 0, DUPLICATE_SAME_ACCESS);
+	  DuplicateHandle (GetCurrentProcess (), ptys_primary->output_mutex,
+			   GetCurrentProcess (), &ptys_output_mutex,
+			   0, 0, DUPLICATE_SAME_ACCESS);
+	  if (!enable_pcon)
+	    fhandler_pty_slave::transfer_input (fhandler_pty_slave::to_nat,
+						ptys_primary->get_handle_cyg (),
+						ptys_ttyp, ptys_unit,
+						ptys_input_available_event);
 	}
 
       /* Set up needed handles for stdio */
@@ -839,9 +905,8 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  child->start_time = time (NULL); /* Register child's starting time. */
 	  child->nice = myself->nice;
 	  postfork (child);
-	  if (mode == _P_DETACH
-	      ? !child.remember (true)
-	      : !(child.remember (false) && child.reattach ()))
+	  if (mode != _P_DETACH
+	      && (!child.remember () || !child.attach ()))
 	    {
 	      /* FIXME: Child in strange state now */
 	      CloseHandle (pi.hProcess);
@@ -897,6 +962,36 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 		  && WaitForSingleObject (pi.hProcess, 0) == WAIT_TIMEOUT)
 		wait_for_myself ();
 	    }
+	  if (sem)
+	    __posix_spawn_sem_release (sem, 0);
+	  if (enable_pcon || ptys_ttyp || cons_native)
+	    WaitForSingleObject (pi.hProcess, INFINITE);
+	  if (ptys_ttyp)
+	    {
+	      ptys_ttyp->wait_pcon_fwd ();
+	      /* Do not transfer input if another process using pseudo
+		 console exists. */
+	      WaitForSingleObject (ptys_output_mutex, INFINITE);
+	      if (!fhandler_pty_common::get_console_process_id
+			      (myself->exec_dwProcessId, false, true, true))
+		fhandler_pty_slave::transfer_input (fhandler_pty_slave::to_cyg,
+						    ptys_from_master,
+						    ptys_ttyp, ptys_unit,
+						    ptys_input_available_event);
+	      CloseHandle (ptys_from_master);
+	      CloseHandle (ptys_input_available_event);
+	      fhandler_pty_slave::close_pseudoconsole (ptys_ttyp);
+	      ReleaseMutex (ptys_output_mutex);
+	      CloseHandle (ptys_output_mutex);
+	    }
+	  if (cons_native)
+	    {
+	      fhandler_console::request_xterm_mode_output (true,
+							   &cons_handle_set);
+	      fhandler_console::request_xterm_mode_input (true,
+							  &cons_handle_set);
+	      fhandler_console::close_handle_set (&cons_handle_set);
+	    }
 	  myself.exit (EXITCODE_NOSET);
 	  break;
 	case _P_WAIT:
@@ -904,6 +999,32 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  system_call.arm ();
 	  if (waitpid (cygpid, &res, 0) != cygpid)
 	    res = -1;
+	  if (ptys_ttyp)
+	    {
+	      ptys_ttyp->wait_pcon_fwd ();
+	      /* Do not transfer input if another process using pseudo
+		 console exists. */
+	      WaitForSingleObject (ptys_output_mutex, INFINITE);
+	      if (!fhandler_pty_common::get_console_process_id
+			      (myself->exec_dwProcessId, false, true, true))
+		fhandler_pty_slave::transfer_input (fhandler_pty_slave::to_cyg,
+						    ptys_from_master,
+						    ptys_ttyp, ptys_unit,
+						    ptys_input_available_event);
+	      CloseHandle (ptys_from_master);
+	      CloseHandle (ptys_input_available_event);
+	      fhandler_pty_slave::close_pseudoconsole (ptys_ttyp);
+	      ReleaseMutex (ptys_output_mutex);
+	      CloseHandle (ptys_output_mutex);
+	    }
+	  if (cons_native)
+	    {
+	      fhandler_console::request_xterm_mode_output (true,
+							   &cons_handle_set);
+	      fhandler_console::request_xterm_mode_input (true,
+							  &cons_handle_set);
+	      fhandler_console::close_handle_set (&cons_handle_set);
+	    }
 	  break;
 	case _P_DETACH:
 	  res = 0;	/* Lost all memory of this child. */
@@ -929,21 +1050,6 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
   this->cleanup ();
   if (envblock)
     free (envblock);
-
-  if (attach_to_console && pid_restore)
-    {
-      FreeConsole ();
-      AttachConsole (pid_restore);
-      cygheap_fdenum cfd (false);
-      int fd;
-      while ((fd = cfd.next ()) >= 0)
-	if (cfd->get_major () == DEV_PTYS_MAJOR)
-	  {
-	    fhandler_pty_slave *ptys =
-	      (fhandler_pty_slave *) (fhandler_base *) cfd;
-	    ptys->fixup_after_attach (false, fd);
-	  }
-    }
 
   return (int) res;
 }
@@ -1293,5 +1399,105 @@ av::setup (const char *prog_arg, path_conv& real_path, const char *ext,
 
 err:
   __seterrno ();
+  return -1;
+}
+
+/* The following __posix_spawn_* functions are called from newlib's posix_spawn
+   implementation.  The original code in newlib has been taken from FreeBSD,
+   and the core code relies on specific, non-portable behaviour of vfork(2).
+   Our replacement implementation uses a semaphore to synchronize parent and
+   child process.  Note: __posix_spawn_fork in fork.cc is part of the set. */
+
+/* Create an inheritable semaphore.  Set it to 0 (== non-signalled), so the
+   parent can wait on the semaphore immediately. */
+extern "C" int
+__posix_spawn_sem_create (void **semp)
+{
+  HANDLE sem;
+  OBJECT_ATTRIBUTES attr;
+  NTSTATUS status;
+
+  if (!semp)
+    return EINVAL;
+  InitializeObjectAttributes (&attr, NULL, OBJ_INHERIT, NULL, NULL);
+  status = NtCreateSemaphore (&sem, SEMAPHORE_ALL_ACCESS, &attr, 0, INT_MAX);
+  if (!NT_SUCCESS (status))
+    return geterrno_from_nt_status (status);
+  *semp = sem;
+  return 0;
+}
+
+/* Signal the semaphore.  "error" should be 0 if all went fine and the
+   exec'd child process is up and running, a useful POSIX error code otherwise.
+   After releasing the semaphore, the value of the semaphore reflects
+   the error code + 1.  Thus, after WFMO in__posix_spawn_sem_wait_and_close,
+   querying the value of the semaphore returns either 0 if all went well,
+   or a value > 0 equivalent to the POSIX error code. */
+extern "C" void
+__posix_spawn_sem_release (void *sem, int error)
+{
+  ReleaseSemaphore (sem, error + 1, NULL);
+}
+
+/* Helper to check the semaphore value. */
+static inline int
+__posix_spawn_sem_query (void *sem)
+{
+  SEMAPHORE_BASIC_INFORMATION sbi;
+
+  NtQuerySemaphore (sem, SemaphoreBasicInformation, &sbi, sizeof sbi, NULL);
+  return sbi.CurrentCount;
+}
+
+/* Called from parent to wait for fork/exec completion.  We're waiting for
+   the semaphore as well as the child's process handle, so even if the
+   child crashes without signalling the semaphore, we won't wait infinitely. */
+extern "C" int
+__posix_spawn_sem_wait_and_close (void *sem, void *proc)
+{
+  int ret = 0;
+  HANDLE w4[2] = { sem, proc };
+
+  switch (WaitForMultipleObjects (2, w4, FALSE, INFINITE))
+    {
+    case WAIT_OBJECT_0:
+      ret = __posix_spawn_sem_query (sem);
+      break;
+    case WAIT_OBJECT_0 + 1:
+      /* If we return here due to the child process dying, the semaphore is
+	 very likely not signalled.  Check this here and return a valid error
+	 code. */
+      ret = __posix_spawn_sem_query (sem);
+      if (ret == 0)
+	ret = ECHILD;
+      break;
+    default:
+      ret = geterrno_from_win_error ();
+      break;
+    }
+
+  CloseHandle (sem);
+  return ret;
+}
+
+/* Replacement for execve/execvpe, called from forked child in newlib's
+   posix_spawn.  The relevant difference is the additional semaphore
+   so the worker method (which is not supposed to return on success)
+   can signal the semaphore after sync'ing with the exec'd child. */
+extern "C" int
+__posix_spawn_execvpe (const char *path, char * const *argv, char *const *envp,
+		       HANDLE sem, int use_env_path)
+{
+  path_conv buf;
+
+  static char *const empty_env[] = { NULL };
+  if (!envp)
+    envp = empty_env;
+  ch_spawn.set_sem (sem);
+  ch_spawn.worker (use_env_path ? (find_exec (path, buf, "PATH", FE_NNF) ?: "")
+				: path,
+		   argv, envp,
+		   _P_OVERLAY | (use_env_path ? _P_PATH_TYPE_EXEC : 0));
+  __posix_spawn_sem_release (sem, errno);
   return -1;
 }

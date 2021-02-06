@@ -103,7 +103,7 @@ fhandler_serial::raw_read (void *ptr, size_t& ulen)
 		default: /* Handle an error case from cygwait basically like
 			    a cancel condition and see if we got "something" */
 		  CancelIo (get_handle ());
-		  /*FALLTHRU*/
+		  fallthrough;
 		case WAIT_OBJECT_0:
 		  if (!GetOverlappedResult (get_handle (), &ov, &read_bytes,
 					    TRUE))
@@ -727,7 +727,12 @@ fhandler_serial::tcsetattr (int action, const struct termios *t)
   /* -------------- Set parity ------------------ */
 
   if (t->c_cflag & PARENB)
-    state.Parity = (t->c_cflag & PARODD) ? ODDPARITY : EVENPARITY;
+    {
+      if(t->c_cflag & CMSPAR)
+        state.Parity = (t->c_cflag & PARODD) ? MARKPARITY : SPACEPARITY;
+      else
+        state.Parity = (t->c_cflag & PARODD) ? ODDPARITY : EVENPARITY;
+    }
   else
     state.Parity = NOPARITY;
 
@@ -1068,6 +1073,10 @@ fhandler_serial::tcgetattr (struct termios *t)
     t->c_cflag |= (PARENB | PARODD);
   if (state.Parity == EVENPARITY)
     t->c_cflag |= PARENB;
+  if (state.Parity == MARKPARITY)
+    t->c_cflag |= (PARENB | PARODD | CMSPAR);
+  if (state.Parity == SPACEPARITY)
+    t->c_cflag |= (PARENB | CMSPAR);
 
   /* -------------- Parity errors ------------------ */
 

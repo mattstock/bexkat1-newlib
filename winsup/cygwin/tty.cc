@@ -234,22 +234,20 @@ tty::init ()
   was_opened = false;
   master_pid = 0;
   is_console = false;
-  attach_pcon_in_fork = false;
-  h_pseudo_console = NULL;
   column = 0;
+  pcon_activated = false;
   switch_to_pcon_in = false;
-  switch_to_pcon_out = false;
-  screen_alternated = false;
-  mask_switch_to_pcon_in = false;
   pcon_pid = 0;
-  num_pcon_attached_slaves = 0;
   term_code_page = 0;
-  need_redraw_screen = false;
-  fwd_done = NULL;
   pcon_last_time = 0;
-  pcon_in_empty = true;
-  req_transfer_input_to_pcon = false;
-  req_flush_pcon_input = false;
+  pcon_start = false;
+  pcon_cap_checked = false;
+  has_csi6n = false;
+  need_invisible_console = false;
+  invisible_console_pid = 0;
+  previous_code_page = 0;
+  previous_output_code_page = 0;
+  master_is_running_as_service = false;
 }
 
 HANDLE
@@ -293,4 +291,24 @@ tty_min::ttyname ()
   device d;
   d.parse (ntty);
   return d.name ();
+}
+
+void
+tty::wait_pcon_fwd (bool init)
+{
+  /* The forwarding in pseudo console sometimes stops for
+     16-32 msec even if it already has data to transfer.
+     If the time without transfer exceeds 32 msec, the
+     forwarding is supposed to be finished. pcon_last_time
+     is reset to GetTickCount() in pty master forwarding
+     thread when the last data is transfered. */
+  const int sleep_in_pcon = 16;
+  const int time_to_wait = sleep_in_pcon * 2 + 1/* margine */;
+  if (init)
+    pcon_last_time = GetTickCount ();
+  while (GetTickCount () - pcon_last_time < time_to_wait)
+    {
+      int tw = time_to_wait - (GetTickCount () - pcon_last_time);
+      cygwait (tw);
+    }
 }

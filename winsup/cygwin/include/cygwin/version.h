@@ -10,8 +10,8 @@ details. */
    the Cygwin shared library".  This version is used to track important
    changes to the DLL and is mainly informative in nature. */
 
-#define CYGWIN_VERSION_DLL_MAJOR 3001
-#define CYGWIN_VERSION_DLL_MINOR 5
+#define CYGWIN_VERSION_DLL_MAJOR 3002
+#define CYGWIN_VERSION_DLL_MINOR 0
 
 /* Major numbers before CYGWIN_VERSION_DLL_EPOCH are incompatible. */
 
@@ -73,6 +73,9 @@ details. */
 
 #define CYGWIN_VERSION_CHECK_FOR_EXTRA_TM_MEMBERS \
   (CYGWIN_VERSION_USER_API_VERSION_COMBINED >= 272)
+
+#define CYGWIN_VERSION_CHECK_FOR_UNAME_X \
+  (CYGWIN_VERSION_USER_API_VERSION_COMBINED >= 335)
 
 #define CYGWIN_VERSION_CYGWIN_CONV 181
 

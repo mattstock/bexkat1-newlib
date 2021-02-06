@@ -69,7 +69,7 @@ error (const char *fmt, ...)
   exit (1);
 }
 
-static void
+static void __attribute__ ((__noreturn__))
 usage ()
 {
   printf ("Usage: %s [OPTION]... FILE...\n\
@@ -85,6 +85,7 @@ Print shared library dependencies\n\
   -v, --verbose           print all information\n\
                           (currently unimplemented)\n",
 	   program_invocation_short_name);
+  exit (0);
 }
 
 static void
@@ -406,6 +407,8 @@ report (const char *in_fn, bool multiple)
 	  }
 	  break;
 	case EXIT_PROCESS_DEBUG_EVENT:
+	  if (ev.u.ExitProcess.dwExitCode != 0)
+	    process_fn = fn_win;
 print_and_exit:
 	  print_dlls (&dll_list, isdll ? fn_win : NULL, process_fn);
 	  exitnow = true;
@@ -444,7 +447,6 @@ main (int argc, char **argv)
 	exit (1);
       case 'h':
 	usage ();
-	exit (0);
       case 'V':
 	print_version ();
 	return 0;

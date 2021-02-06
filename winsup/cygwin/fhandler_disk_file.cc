@@ -491,7 +491,7 @@ fhandler_base::fstat_helper (struct stat *buf)
       else
 	{
 	  buf->st_dev = buf->st_rdev = dev ();
-	  buf->st_mode |= dev ().mode () & S_IFMT;
+	  buf->st_mode = dev ().mode ();
 	  buf->st_size = 0;
 	}
     }
@@ -887,15 +887,18 @@ fhandler_disk_file::fchown (uid_t uid, gid_t gid)
 				    aclp, MAX_ACL_ENTRIES)) < 0)
     goto out;
 
-  if (uid == ILLEGAL_UID)
-    uid = old_uid;
-  if (gid == ILLEGAL_GID)
-    gid = old_gid;
-  if (uid == old_uid && gid == old_gid)
+  /* According to POSIX, chown can be a no-op if uid is (uid_t)-1 and
+     gid is (gid_t)-1.  Otherwise, even if uid and gid are unchanged,
+     we must ensure that ctime is updated. */
+  if (uid == ILLEGAL_UID && gid == ILLEGAL_GID)
     {
       ret = 0;
       goto out;
     }
+  if (uid == ILLEGAL_UID)
+    uid = old_uid;
+  else if (gid == ILLEGAL_GID)
+    gid = old_gid;
 
   /* Windows ACLs can contain permissions for one group, while being owned by
      another user/group.  The permission bits returned above are pretty much
@@ -1469,7 +1472,7 @@ fhandler_base::open_fs (int flags, mode_t mode)
 
   bool new_file = !exists ();
 
-  int res = fhandler_base::open (flags | O_DIROPEN, mode);
+  int res = fhandler_base::open (flags, mode);
   if (res)
     {
       /* The file info in pc is wrong at this point for newly created files.
@@ -1852,26 +1855,6 @@ fhandler_disk_file::rmdir ()
 
   NTSTATUS status = unlink_nt (pc);
 
-  /* Check for existence of remote dirs after trying to delete them.
-     Two reasons:
-     - Sometimes SMB indicates failure when it really succeeds.
-     - Removing a directory on a Samba drive using an old Samba version
-       sometimes doesn't return an error, if the directory can't be removed
-       because it's not empty. */
-  if (isremote ())
-    {
-      OBJECT_ATTRIBUTES attr;
-      FILE_BASIC_INFORMATION fbi;
-      NTSTATUS q_status;
-
-      q_status = NtQueryAttributesFile (pc.get_object_attr (attr, sec_none_nih),
-					&fbi);
-      if (!NT_SUCCESS (status) && q_status == STATUS_OBJECT_NAME_NOT_FOUND)
-	status = STATUS_SUCCESS;
-      else if (pc.fs_is_samba ()
-	       && NT_SUCCESS (status) && NT_SUCCESS (q_status))
-	status = STATUS_DIRECTORY_NOT_EMPTY;
-    }
   if (!NT_SUCCESS (status))
     {
       __seterrno_from_nt_status (status);
