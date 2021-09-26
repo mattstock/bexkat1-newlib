@@ -502,8 +502,10 @@ path_conv::set_nt_native_path (PUNICODE_STRING new_path)
   uni_path.Buffer = wide_path;
 }
 
+/* If suffix is not NULL, append the suffix string verbatim.
+   This is used by fhandler_mqueue::mq_open to append an NTFS stream suffix. */
 PUNICODE_STRING
-path_conv::get_nt_native_path ()
+path_conv::get_nt_native_path (PUNICODE_STRING suffix)
 {
   PUNICODE_STRING res;
   if (wide_path)
@@ -514,9 +516,13 @@ path_conv::get_nt_native_path ()
     {
       uni_path.Length = 0;
       uni_path.MaximumLength = (strlen (path) + 10) * sizeof (WCHAR);
+      if (suffix)
+	uni_path.MaximumLength += suffix->Length;
       wide_path = (PWCHAR) cmalloc_abort (HEAP_STR, uni_path.MaximumLength);
       uni_path.Buffer = wide_path;
       ::get_nt_native_path (path, uni_path, has_dos_filenames_only ());
+      if (suffix)
+	RtlAppendUnicodeStringToString (&uni_path, suffix);
       res = &uni_path;
     }
   return res;
@@ -716,9 +722,10 @@ path_conv::check (const char *src, unsigned opt,
 	  int symlen = 0;
 
 	  /* Make sure to check certain flags on last component only. */
-	  for (unsigned pc_flags = opt & (PC_NO_ACCESS_CHECK | PC_KEEP_HANDLE);
+	  for (unsigned pc_flags = opt & (PC_NO_ACCESS_CHECK | PC_KEEP_HANDLE
+					 | PC_SYM_FOLLOW | PC_SYM_NOFOLLOW_REP);
 	       ;
-	       pc_flags = 0)
+	       pc_flags = opt & (PC_SYM_FOLLOW | PC_SYM_NOFOLLOW_REP))
 	    {
 	      const suffix_info *suff;
 	      char *full_path;
@@ -1010,17 +1017,25 @@ path_conv::check (const char *src, unsigned opt,
 		    }
 		  goto out;	// file found
 		}
-	      /* Found a symlink if symlen > 0.  If component == 0, then the
-		 src path itself was a symlink.  If !follow_mode then
-		 we're done.  Otherwise we have to insert the path found
-		 into the full path that we are building and perform all of
-		 these operations again on the newly derived path. */
-	      else if (symlen > 0)
+	      /* Found a symlink if symlen > 0 or short-circuited a native
+		 symlink or junction point if symlen < 0.
+		 If symlen > 0 and component == 0, then the src path itself
+		 was a symlink.  If !follow_mode then we're done.  Otherwise
+		 we have to insert the path found into the full path that we
+		 are building and perform all of these operations again on the
+		 newly derived path. */
+	      else if (symlen)
 		{
-		  if (component == 0
-		      && (!(opt & PC_SYM_FOLLOW)
-			  || (is_winapi_reparse_point ()
-			      && (opt & PC_SYM_NOFOLLOW_REP))))
+		  /* if symlen is negativ, the actual native symlink or
+		      junction point is an inner path component.  Just fix up
+		      symlen to be positive and don't try any PC_SYM_FOLLOW
+		      handling. */
+		  if (symlen < 0)
+		    symlen = -symlen;
+		  else if (component == 0
+			   && (!(opt & PC_SYM_FOLLOW)
+			       || (is_winapi_reparse_point ()
+				   && (opt & PC_SYM_NOFOLLOW_REP))))
 		    {
 		      /* Usually a trailing slash requires to follow a symlink,
 			 even with PC_SYM_NOFOLLOW.  The reason is that "foo/"
@@ -1174,6 +1189,10 @@ path_conv::check (const char *src, unsigned opt,
 	  return;
 	}
 
+      /* Restore last path component */
+      if (tail < path_end && tail > path_copy + 1)
+	*tail = '/';
+
       if (dev.isfs ())
 	{
 	  /* If FS hasn't been checked already in symlink_info::check,
@@ -1211,6 +1230,10 @@ path_conv::check (const char *src, unsigned opt,
 	    set_exec (1);
 	  else if (issymlink () || issocket ())
 	    set_exec (0);
+
+	  /* FIXME: bad hack alert!!!  We need a better solution */
+	  if (!strncmp (path_copy, MQ_PATH, MQ_LEN) && path_copy[MQ_LEN])
+	    dev.parse (FH_MQUEUE);
 	}
 
       if (opt & PC_NOFULL)
@@ -1244,11 +1267,7 @@ path_conv::check (const char *src, unsigned opt,
 	path_flags |= PATH_CTTY;
 
       if (opt & PC_POSIX)
-	{
-	  if (tail < path_end && tail > path_copy + 1)
-	    *tail = '/';
-	  set_posix (path_copy);
-	}
+	set_posix (path_copy);
 
 #if 0
       if (!error)
@@ -1994,7 +2013,7 @@ symlink_worker (const char *oldpath, path_conv &win32_newpath, bool isdevice)
       /* Don't try native symlinks on FSes not supporting reparse points. */
       else if ((wsym_type == WSYM_native || wsym_type == WSYM_nativestrict)
 	       && !(win32_newpath.fs_flags () & FILE_SUPPORTS_REPARSE_POINTS))
-	wsym_type = WSYM_sysfile;
+	wsym_type = WSYM_default;
 
       /* Attach .lnk suffix when shortcut is requested. */
       if (wsym_type == WSYM_lnk && !win32_newpath.exists ()
@@ -2040,9 +2059,9 @@ symlink_worker (const char *oldpath, path_conv &win32_newpath, bool isdevice)
 	      __leave;
 	    }
 	  /* Otherwise, fall back to default symlink type. */
-	  wsym_type = WSYM_sysfile;
+	  wsym_type = WSYM_default;
 	  fallthrough;
-	case WSYM_sysfile:
+	case WSYM_default:
 	  if (win32_newpath.fs_flags () & FILE_SUPPORTS_REPARSE_POINTS)
 	    {
 	      res = symlink_wsl (oldpath, win32_newpath);
@@ -2052,6 +2071,7 @@ symlink_worker (const char *oldpath, path_conv &win32_newpath, bool isdevice)
 	  /* On FSes not supporting reparse points, or in case of an error
 	     creating the WSL symlink, fall back to creating the plain old
 	     SYSTEM file symlink. */
+	  wsym_type = WSYM_sysfile;
 	  break;
 	default:
 	  break;
@@ -2192,7 +2212,7 @@ symlink_worker (const char *oldpath, path_conv &win32_newpath, bool isdevice)
 		  * sizeof (WCHAR);
 	  cp += *plen;
 	}
-      else
+      else /* wsym_type == WSYM_sysfile */
 	{
 	  /* Default technique creating a symlink. */
 	  buf = tp.t_get ();
@@ -2459,6 +2479,22 @@ symlink_info::check_sysfile (HANDLE h)
   return res;
 }
 
+typedef struct _REPARSE_APPEXECLINK_BUFFER
+{
+  DWORD ReparseTag;
+  WORD  ReparseDataLength;
+  WORD  Reserved;
+  struct {
+    DWORD Version;       /* Take member name with a grain of salt. */
+    WCHAR Strings[1];    /* Four serialized, NUL-terminated WCHAR strings:
+			   - Package ID
+			   - Entry Point
+			   - Executable Path
+			   - Application Type
+			   We're only interested in the Executable Path */
+  } AppExecLinkReparseBuffer;
+} REPARSE_APPEXECLINK_BUFFER,*PREPARSE_APPEXECLINK_BUFFER;
+
 static bool
 check_reparse_point_string (PUNICODE_STRING subst)
 {
@@ -2557,6 +2593,30 @@ check_reparse_point_target (HANDLE h, bool remote, PREPARSE_DATA_BUFFER rp,
 	}
       if (check_reparse_point_string (psymbuf))
 	return PATH_SYMLINK | PATH_REP;
+    }
+  else if (!remote && rp->ReparseTag == IO_REPARSE_TAG_APPEXECLINK)
+    {
+      /* App execution aliases are commonly used by Windows Store apps. */
+      PREPARSE_APPEXECLINK_BUFFER rpl = (PREPARSE_APPEXECLINK_BUFFER) rp;
+      WCHAR *buf = rpl->AppExecLinkReparseBuffer.Strings;
+      DWORD size = rp->ReparseDataLength / sizeof (WCHAR), n;
+
+      /* It seems that app execution aliases have a payload of four
+	 NUL-separated wide string: package id, entry point, executable
+	 and application type. We're interested in the executable. */
+      for (int i = 0; i < 3 && size > 0; i++)
+	{
+	  n = wcsnlen (buf, size - 1);
+	  if (i == 2 && n > 0 && n < size)
+	    {
+	      RtlInitCountedUnicodeString (psymbuf, buf, n * sizeof (WCHAR));
+	      return PATH_SYMLINK | PATH_REP;
+	    }
+	  if (i == 2)
+	    break;
+	  buf += n + 1;
+	  size -= n + 1;
+	}
     }
   else if (rp->ReparseTag == IO_REPARSE_TAG_LX_SYMLINK)
     {
@@ -3392,6 +3452,78 @@ restart:
 	  res = check_nfs_symlink (h);
 	  if (res)
 	    break;
+	}
+
+      /* Check if the inner path components contain native symlinks or
+	 junctions, or if the drive is a virtual drive.  Compare incoming
+	 path with path returned by GetFinalPathNameByHandleA.  If they
+	 differ, return the final path as symlink content and set symlen
+	 to a negative value.  This forces path_conv::check to restart
+	 symlink evaluation with the new path. */
+#ifdef __i386__
+      /* On WOW64, ignore any potential problems if the path is inside
+	 the Windows dir to avoid false positives for stuff under File
+	 System Redirector control.  Believe it or not, but even
+	 GetFinalPathNameByHandleA returns the converted path for the
+	 Sysnative dir.  I. e.
+
+	     C:\Windows\Sysnative --> C:\Windows\System32
+
+	 This is obviously wrong when using this path for further
+	 file manipulation because the non-final path points to another
+	 file than the final path.  Oh well... */
+      if (!fs.is_remote_drive () && wincap.is_wow64 ())
+	{
+	  /* windows_directory_path is stored without trailing backslash,
+	     so we have to check this explicitely. */
+	  if (RtlEqualUnicodePathPrefix (&upath, &windows_directory_path, TRUE)
+	      && upath.Buffer[windows_directory_path.Length / sizeof (WCHAR)]
+		 == L'\\')
+	    goto file_not_symlink;
+	}
+#endif /* __i386__ */
+      if ((pc_flags & (PC_SYM_FOLLOW | PC_SYM_NOFOLLOW_REP)) == PC_SYM_FOLLOW)
+	{
+	  PWCHAR fpbuf = tp.w_get ();
+	  DWORD ret;
+
+	  ret = GetFinalPathNameByHandleW (h, fpbuf, NT_MAX_PATH, 0);
+	  if (ret)
+	    {
+	      UNICODE_STRING fpath;
+
+	      RtlInitCountedUnicodeString (&fpath, fpbuf, ret * sizeof (WCHAR));
+	      fpbuf[1] = L'?';	/* \\?\ --> \??\ */
+	      if (!RtlEqualUnicodeString (&upath, &fpath, !!ci_flag))
+	        {
+		  issymlink = true;
+		  /* upath.Buffer is big enough and unused from this point on.
+		     Reuse it here, avoiding yet another buffer allocation. */
+		  char *nfpath = (char *) upath.Buffer;
+		  sys_wcstombs (nfpath, NT_MAX_PATH, fpbuf);
+		  res = posixify (nfpath);
+
+		  /* If the incoming path consisted of a drive prefix only,
+		     we just handle a virtual drive, created with, e.g.
+
+		       subst X: C:\foo\bar
+
+		     Treat it like a symlink.  This is required to tell an
+		     lstat caller that the "drive" is actually pointing
+		     somewhere else, thus, it's a symlink in POSIX speak. */
+		  if (upath.Length == 14)	/* \??\X:\ */
+		    {
+		      fileattr &= ~FILE_ATTRIBUTE_DIRECTORY;
+		      path_flags |= PATH_SYMLINK;
+		    }
+		  /* For final paths differing in inner path components return
+		     length as negative value.  This informs path_conv::check
+		     to skip realpath handling on the last path component. */
+		  else
+		    res = -res;
+		  break;
+	        }
+	    }
 	}
 
     /* Normal file. */
@@ -4588,30 +4720,15 @@ find_fast_cwd ()
   if (!f_cwd_ptr)
     {
       bool warn = 1;
+      USHORT emulated, hosted;
 
-#ifndef __x86_64__
-      #ifndef PROCESSOR_ARCHITECTURE_ARM64
-      #define PROCESSOR_ARCHITECTURE_ARM64 12
-      #endif
-
-      SYSTEM_INFO si;
-
-      /* Check if we're running in WOW64 on ARM64.  Skip the warning as long as
-	 there's no solution for finding the FAST_CWD pointer on that system.
-
-	 2018-07-12: Apparently current ARM64 WOW64 has a bug:
-	 It's GetNativeSystemInfo returns PROCESSOR_ARCHITECTURE_INTEL in
-	 wProcessorArchitecture.  Since that's an invalid value (a 32 bit
-	 host system hosting a 32 bit emulator for itself?) we can use this
-	 value as an indicator to skip the message as well. */
-      if (wincap.is_wow64 ())
-	{
-	  GetNativeSystemInfo (&si);
-	  if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64
-	      || si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
-	    warn = 0;
-	}
-#endif /* !__x86_64__ */
+      /* Check if we're running in WOW64 on ARM64.  Check on 64 bit as well,
+	 given that ARM64 Windows 10 provides a x86_64 emulation soon.  Skip
+	 warning as long as there's no solution for finding the FAST_CWD
+	 pointer on that system. */
+      if (IsWow64Process2 (GetCurrentProcess (), &emulated, &hosted)
+	  && hosted == IMAGE_FILE_MACHINE_ARM64)
+	warn = 0;
 
       if (warn)
 	small_printf ("Cygwin WARNING:\n"
@@ -4769,6 +4886,7 @@ cwdstuff::set (path_conv *nat_cwd, const char *posix_cwd)
 {
   NTSTATUS status;
   UNICODE_STRING upath;
+  OBJECT_ATTRIBUTES attr;
   PEB &peb = *NtCurrentTeb ()->Peb;
   bool virtual_path = false;
   bool unc_path = false;
@@ -4810,7 +4928,23 @@ cwdstuff::set (path_conv *nat_cwd, const char *posix_cwd)
     {
       upath = *nat_cwd->get_nt_native_path ();
       if (nat_cwd->isspecial ())
-	virtual_path = true;
+	{
+	  virtual_path = true;
+	  /* But allow starting of native apps from /dev if /dev actually
+	     exists on disk. */
+	  if (isdev_dev (nat_cwd->dev))
+	    {
+	      FILE_BASIC_INFORMATION fbi;
+
+	      InitializeObjectAttributes (&attr, &upath,
+					  OBJ_CASE_INSENSITIVE | OBJ_INHERIT,
+					  NULL, NULL);
+	      status = NtQueryAttributesFile (&attr, &fbi);
+	      if (status != STATUS_OBJECT_NAME_NOT_FOUND
+		  && status != STATUS_OBJECT_PATH_NOT_FOUND)
+		virtual_path = false;
+	    }
+	}
     }
 
   /* Memorize old DismountCount before opening the dir.  This value is
@@ -4827,7 +4961,6 @@ cwdstuff::set (path_conv *nat_cwd, const char *posix_cwd)
   if (!virtual_path)
     {
       IO_STATUS_BLOCK io;
-      OBJECT_ATTRIBUTES attr;
 
       if (!nat_cwd)
 	{

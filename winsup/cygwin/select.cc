@@ -74,7 +74,7 @@ details. */
 })
 
 #define set_handle_or_return_if_not_open(h, s) \
-  h = (s)->fh->get_handle_cyg (); \
+  h = (s)->fh->get_handle (); \
   if (cygheap->fdtab.not_open ((s)->fd)) \
     { \
       (s)->thread_errno =  EBADF; \
@@ -527,7 +527,10 @@ set_bits (select_record *me, fd_set *readfds, fd_set *writefds,
 	  /* Set readfds entry in case of a failed connect. */
 	  if (!me->read_ready && me->read_selected
 	      && sock->connect_state () == connect_failed)
-	    UNIX_FD_SET (me->fd, readfds);
+	    {
+	      UNIX_FD_SET (me->fd, readfds);
+	      ready++;
+	    }
 	}
       ready++;
     }
@@ -584,12 +587,17 @@ no_verify (select_record *, fd_set *, fd_set *, fd_set *)
 static int
 pipe_data_available (int fd, fhandler_base *fh, HANDLE h, bool writing)
 {
+  if (fh->get_device () == FH_PIPER)
+    {
+      DWORD nbytes_in_pipe;
+      if (!writing && PeekNamedPipe (h, NULL, 0, NULL, &nbytes_in_pipe, NULL))
+	return nbytes_in_pipe > 0;
+      return -1;
+    }
+
   IO_STATUS_BLOCK iosb = {{0}, 0};
   FILE_PIPE_LOCAL_INFORMATION fpli = {0};
   NTSTATUS status;
-
-  if (fh->has_ongoing_io ())
-    return 0;
 
   status = NtQueryInformationFile (h, &iosb, &fpli, sizeof (fpli),
 				   FilePipeLocalInformation);
@@ -605,29 +613,55 @@ pipe_data_available (int fd, fhandler_base *fh, HANDLE h, bool writing)
     }
   if (writing)
     {
-	/* If there is anything available in the pipe buffer then signal
-	   that.  This means that a pipe could still block since you could
-	   be trying to write more to the pipe than is available in the
-	   buffer but that is the hazard of select().  */
-      fpli.WriteQuotaAvailable = fpli.OutboundQuota - fpli.ReadDataAvailable;
+      /* If there is anything available in the pipe buffer then signal
+        that.  This means that a pipe could still block since you could
+        be trying to write more to the pipe than is available in the
+        buffer but that is the hazard of select().
+
+        Note that WriteQuotaAvailable is unreliable.
+
+        Usually WriteQuotaAvailable on the write side reflects the space
+        available in the inbound buffer on the read side.  However, if a
+        pipe read is currently pending, WriteQuotaAvailable on the write side
+        is decremented by the number of bytes the read side is requesting.
+        So it's possible (even likely) that WriteQuotaAvailable is 0, even
+        if the inbound buffer on the read side is not full.  This can lead to
+        a deadlock situation: The reader is waiting for data, but select
+        on the writer side assumes that no space is available in the read
+        side inbound buffer.
+
+        Consequentially, the only reliable information is available on the
+        read side, so fetch info from the read side via the pipe-specific
+        query handle.  Use fpli.WriteQuotaAvailable as storage for the actual
+        interesting value, which is the InboundQuote on the write side,
+        decremented by the number of bytes of data in that buffer. */
+      /* Note: Do not use NtQueryInformationFile() for query_hdl because
+	 NtQueryInformationFile() seems to interfere with reading pipes
+	 in non-cygwin apps. Instead, use PeekNamedPipe() here. */
+      if (fh->get_device () == FH_PIPEW && fpli.WriteQuotaAvailable == 0)
+	{
+	  HANDLE query_hdl = ((fhandler_pipe *) fh)->get_query_handle ();
+	  if (!query_hdl)
+	    query_hdl = ((fhandler_pipe *) fh)->temporary_query_hdl ();
+	  if (!query_hdl)
+	    return 1; /* We cannot know actual write pipe space. */
+	  DWORD nbytes_in_pipe;
+	  BOOL res =
+	    PeekNamedPipe (query_hdl, NULL, 0, NULL, &nbytes_in_pipe, NULL);
+	  if (!((fhandler_pipe *) fh)->get_query_handle ())
+	    CloseHandle (query_hdl); /* Close temporary query_hdl */
+	  if (!res)
+	    return 1;
+	  fpli.WriteQuotaAvailable = fpli.InboundQuota - nbytes_in_pipe;
+	}
       if (fpli.WriteQuotaAvailable > 0)
 	{
 	  paranoid_printf ("fd %d, %s, write: size %u, avail %u", fd,
-			   fh->get_name (), fpli.OutboundQuota,
+			   fh->get_name (), fpli.InboundQuota,
 			   fpli.WriteQuotaAvailable);
 	  return 1;
 	}
-      /* If we somehow inherit a tiny pipe (size < PIPE_BUF), then consider
-	 the pipe writable only if it is completely empty, to minimize the
-	 probability that a subsequent write will block.  */
-      if (fpli.OutboundQuota < PIPE_BUF
-	  && fpli.WriteQuotaAvailable == fpli.OutboundQuota)
-	{
-	  select_printf ("fd, %s, write tiny pipe: size %u, avail %u",
-			 fd, fh->get_name (), fpli.OutboundQuota,
-			 fpli.WriteQuotaAvailable);
-	  return 1;
-	}
+      /* TODO: Buffer really full or non-Cygwin reader? */
     }
   else if (fpli.ReadDataAvailable)
     {
@@ -710,11 +744,26 @@ peek_pipe (select_record *s, bool from_select)
     }
 
 out:
-  h = fh->get_output_handle_cyg ();
+  if (fh->get_major () == DEV_PTYM_MAJOR)
+    {
+      fhandler_pty_master *fhm = (fhandler_pty_master *) fh;
+      fhm->set_mask_flusho (s->read_ready);
+    }
+  h = fh->get_output_handle ();
   if (s->write_selected && dev != FH_PIPER)
     {
-      gotone += s->write_ready =  pipe_data_available (s->fd, fh, h, true);
-      select_printf ("write: %s, gotone %d", fh->get_name (), gotone);
+      if (dev == FH_PIPEW && ((fhandler_pipe *) fh)->reader_closed ())
+	{
+	  gotone += s->write_ready = true;
+	  if (s->except_selected)
+	    gotone += s->except_ready = true;
+	  return gotone;
+	}
+      int n = pipe_data_available (s->fd, fh, h, true);
+      select_printf ("write: %s, n %d", fh->get_name (), n);
+      gotone += s->write_ready = n;
+      if (n < 0 && s->except_selected)
+	gotone += s->except_ready = true;
     }
   return gotone;
 }
@@ -763,7 +812,13 @@ start_thread_pipe (select_record *me, select_stuff *stuff)
     {
       pi->start = &stuff->start;
       pi->stop_thread = false;
-      pi->bye = CreateEvent (&sec_none_nih, TRUE, FALSE, NULL);
+      pi->bye = me->fh->get_select_sem ();
+      if (pi->bye)
+	DuplicateHandle (GetCurrentProcess (), pi->bye,
+			 GetCurrentProcess (), &pi->bye,
+			 0, 0, DUPLICATE_SAME_ACCESS);
+      else
+	pi->bye = CreateSemaphore (&sec_none_nih, 0, INT32_MAX, NULL);
       pi->thread = new cygthread (thread_pipe, pi, "pipesel");
       me->h = *pi->thread;
       if (!me->h)
@@ -781,7 +836,7 @@ pipe_cleanup (select_record *, select_stuff *stuff)
   if (pi->thread)
     {
       pi->stop_thread = true;
-      SetEvent (pi->bye);
+      ReleaseSemaphore (pi->bye, get_obj_handle_count (pi->bye), NULL);
       pi->thread->detach ();
       CloseHandle (pi->bye);
     }
@@ -907,9 +962,11 @@ peek_fifo (select_record *s, bool from_select)
 out:
   if (s->write_selected)
     {
-      gotone += s->write_ready
-	= pipe_data_available (s->fd, fh, fh->get_handle (), true);
-      select_printf ("write: %s, gotone %d", fh->get_name (), gotone);
+      int n = pipe_data_available (s->fd, fh, fh->get_handle (), true);
+      select_printf ("write: %s, n %d", fh->get_name (), n);
+      gotone += s->write_ready = n;
+      if (n < 0 && s->except_selected)
+	gotone += s->except_ready = true;
     }
   return gotone;
 }
@@ -958,7 +1015,13 @@ start_thread_fifo (select_record *me, select_stuff *stuff)
     {
       pi->start = &stuff->start;
       pi->stop_thread = false;
-      pi->bye = CreateEvent (&sec_none_nih, TRUE, FALSE, NULL);
+      pi->bye = me->fh->get_select_sem ();
+      if (pi->bye)
+	DuplicateHandle (GetCurrentProcess (), pi->bye,
+			 GetCurrentProcess (), &pi->bye,
+			 0, 0, DUPLICATE_SAME_ACCESS);
+      else
+	pi->bye = CreateSemaphore (&sec_none_nih, 0, INT32_MAX, NULL);
       pi->thread = new cygthread (thread_fifo, pi, "fifosel");
       me->h = *pi->thread;
       if (!me->h)
@@ -976,7 +1039,7 @@ fifo_cleanup (select_record *, select_stuff *stuff)
   if (pi->thread)
     {
       pi->stop_thread = true;
-      SetEvent (pi->bye);
+      ReleaseSemaphore (pi->bye, get_obj_handle_count (pi->bye), NULL);
       pi->thread->detach ();
       CloseHandle (pi->bye);
     }
@@ -1147,8 +1210,8 @@ static int
 console_startup (select_record *me, select_stuff *stuff)
 {
   fhandler_console *fh = (fhandler_console *) me->fh;
-  if (wincap.has_con_24bit_colors ())
-    fhandler_console::request_xterm_mode_input (true, fh->get_handle_set ());
+  fhandler_console::set_input_mode (tty::cygwin, &((tty *)fh->tc ())->ti,
+				    fh->get_handle_set ());
 
   select_console_info *ci = stuff->device_specific_console;
   if (ci->start)
@@ -1339,11 +1402,14 @@ peek_pty_slave (select_record *s, bool from_select)
     }
 
 out:
-  HANDLE h = ptys->get_output_handle_cyg ();
+  HANDLE h = ptys->get_output_handle ();
   if (s->write_selected)
     {
-      gotone += s->write_ready =  pipe_data_available (s->fd, fh, h, true);
-      select_printf ("write: %s, gotone %d", fh->get_name (), gotone);
+      int n = pipe_data_available (s->fd, fh, h, true);
+      select_printf ("write: %s, n %d", fh->get_name (), n);
+      gotone += s->write_ready = n;
+      if (n < 0 && s->except_selected)
+	gotone += s->except_ready = true;
     }
   return gotone;
 }
@@ -1567,7 +1633,7 @@ serial_read_cleanup (select_record *s, select_stuff *stuff)
 {
   if (s->h)
     {
-      HANDLE h = ((fhandler_serial *) s->fh)->get_handle_cyg ();
+      HANDLE h = ((fhandler_serial *) s->fh)->get_handle ();
       DWORD undefined;
 
       if (h)
@@ -1606,11 +1672,11 @@ fhandler_serial::select_read (select_stuff *ss)
 
   /* This is apparently necessary for the com0com driver.
      See: http://cygwin.com/ml/cygwin/2009-01/msg00667.html */
-  SetCommMask (get_handle_cyg (), 0);
-  SetCommMask (get_handle_cyg (), EV_RXCHAR);
-  if (ClearCommError (get_handle_cyg (), &io_err, &st) && st.cbInQue)
+  SetCommMask (get_handle (), 0);
+  SetCommMask (get_handle (), EV_RXCHAR);
+  if (ClearCommError (get_handle (), &io_err, &st) && st.cbInQue)
     s->read_ready = true;
-  else if (WaitCommEvent (get_handle_cyg (), &s->fh_data_serial->event,
+  else if (WaitCommEvent (get_handle (), &s->fh_data_serial->event,
 			  &s->fh_data_serial->ov))
     s->read_ready = true;
   else if (GetLastError () == ERROR_IO_PENDING)
@@ -1662,7 +1728,7 @@ fhandler_base::select_read (select_stuff *ss)
       s->startup = no_startup;
       s->verify = verify_ok;
     }
-  s->h = get_handle_cyg ();
+  s->h = get_handle ();
   s->read_selected = true;
   s->read_ready = true;
   return s;
@@ -1677,7 +1743,7 @@ fhandler_base::select_write (select_stuff *ss)
       s->startup = no_startup;
       s->verify = verify_ok;
     }
-  s->h = get_output_handle_cyg ();
+  s->h = get_output_handle ();
   s->write_selected = true;
   s->write_ready = true;
   return s;
@@ -1704,7 +1770,8 @@ peek_socket (select_record *me, bool)
   fhandler_socket_wsock *fh = (fhandler_socket_wsock *) me->fh;
   long events;
   /* Don't play with the settings again, unless having taken a deep look into
-     Richard W. Stevens Network Programming book.  Thank you. */
+     Richard W. Stevens Network Programming book and how these flags are
+     defined in Winsock.  Thank you. */
   long evt_mask = (me->read_selected ? (FD_READ | FD_ACCEPT | FD_CLOSE) : 0)
 		| (me->write_selected ? (FD_WRITE | FD_CONNECT | FD_CLOSE) : 0)
 		| (me->except_selected ? FD_OOB : 0);
@@ -1712,7 +1779,9 @@ peek_socket (select_record *me, bool)
   if (me->read_selected)
     me->read_ready |= ret || !!(events & (FD_READ | FD_ACCEPT | FD_CLOSE));
   if (me->write_selected)
-    me->write_ready |= ret || !!(events & (FD_WRITE | FD_CONNECT | FD_CLOSE));
+    /* Don't check for FD_CLOSE here.  Only an error case (ret == -1)
+       will set ready for writing. */
+    me->write_ready |= ret || !!(events & (FD_WRITE | FD_CONNECT));
   if (me->except_selected)
     me->except_ready |= !!(events & FD_OOB);
 
@@ -1915,10 +1984,7 @@ fhandler_socket_wsock::select_write (select_stuff *ss)
   s->write_ready = saw_shutdown_write () || connect_state () == unconnected;
   s->write_selected = true;
   if (connect_state () != unconnected)
-    {
-      s->except_ready = saw_shutdown_write () || saw_shutdown_read ();
-      s->except_on_write = true;
-    }
+    s->except_on_write = true;
   return s;
 }
 
@@ -1933,8 +1999,6 @@ fhandler_socket_wsock::select_except (select_stuff *ss)
       s->cleanup = socket_cleanup;
     }
   s->peek = peek_socket;
-  /* FIXME: Is this right?  Should these be used as criteria for except? */
-  s->except_ready = saw_shutdown_write () || saw_shutdown_read ();
   s->except_selected = true;
   return s;
 }
@@ -1950,7 +2014,7 @@ fhandler_socket_unix::select_read (select_stuff *ss)
       s->startup = no_startup;
       s->verify = verify_ok;
     }
-  s->h = get_handle_cyg ();
+  s->h = get_handle ();
   s->read_selected = true;
   s->read_ready = true;
   return s;

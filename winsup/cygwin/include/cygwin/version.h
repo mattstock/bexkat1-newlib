@@ -10,7 +10,7 @@ details. */
    the Cygwin shared library".  This version is used to track important
    changes to the DLL and is mainly informative in nature. */
 
-#define CYGWIN_VERSION_DLL_MAJOR 3002
+#define CYGWIN_VERSION_DLL_MAJOR 3003
 #define CYGWIN_VERSION_DLL_MINOR 0
 
 /* Major numbers before CYGWIN_VERSION_DLL_EPOCH are incompatible. */
@@ -73,9 +73,6 @@ details. */
 
 #define CYGWIN_VERSION_CHECK_FOR_EXTRA_TM_MEMBERS \
   (CYGWIN_VERSION_USER_API_VERSION_COMBINED >= 272)
-
-#define CYGWIN_VERSION_CHECK_FOR_UNAME_X \
-  (CYGWIN_VERSION_USER_API_VERSION_COMBINED >= 335)
 
 #define CYGWIN_VERSION_CYGWIN_CONV 181
 
@@ -516,12 +513,14 @@ details. */
        pthread_setaffinity_np, __sched_getaffinity_sys.
   340: Export dbm_clearerr, dbm_close, dbm_delete, dbm_dirfno, dbm_error,
        dbm_fetch, dbm_firstkey, dbm_nextkey, dbm_open, dbm_store.
+  341: Export pthread_cond_clockwait, pthread_mutex_clocklock,
+       pthread_rwlock_clockrdlock, pthread_rwlock_clockwrlock, sem_clockwait.
 
   Note that we forgot to bump the api for ualarm, strtoll, strtoull,
   sigaltstack, sethostname. */
 
 #define CYGWIN_VERSION_API_MAJOR 0
-#define CYGWIN_VERSION_API_MINOR 340
+#define CYGWIN_VERSION_API_MINOR 341
 
 /* There is also a compatibity version number associated with the shared memory
    regions.  It is incremented when incompatible changes are made to the shared

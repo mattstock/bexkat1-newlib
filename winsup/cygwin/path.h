@@ -105,9 +105,10 @@ public:
   }
   inline void dup (const path_conv_handle &pch)
   {
-    if (!DuplicateHandle (GetCurrentProcess (), pch.handle (),
-			  GetCurrentProcess (), &hdl,
-			  0, TRUE, DUPLICATE_SAME_ACCESS))
+    if (pch.handle ()
+	&& !DuplicateHandle (GetCurrentProcess (), pch.handle (),
+			     GetCurrentProcess (), &hdl,
+			     0, TRUE, DUPLICATE_SAME_ACCESS))
       hdl = NULL;
   }
   inline HANDLE handle () const { return hdl; }
@@ -281,7 +282,7 @@ class path_conv
   ~path_conv ();
   inline const char *get_win32 () const { return path; }
   void set_nt_native_path (PUNICODE_STRING);
-  PUNICODE_STRING get_nt_native_path ();
+  PUNICODE_STRING get_nt_native_path (PUNICODE_STRING = NULL);
   inline POBJECT_ATTRIBUTES get_object_attr (OBJECT_ATTRIBUTES &attr,
 					     SECURITY_ATTRIBUTES &sa)
   {
@@ -406,7 +407,6 @@ class path_conv
     return conv_handle.get_finfo (h, fs.is_nfs ());
   }
   inline ino_t get_ino () const { return conv_handle.get_ino (fs.is_nfs ()); }
-  void reset_conv_handle () { conv_handle.set (NULL); }
   void close_conv_handle () { conv_handle.close (); }
 
   ino_t get_ino_by_handle (HANDLE h);

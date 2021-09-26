@@ -20,6 +20,7 @@ details. */
 #define INPUT_AVAILABLE_EVENT	"cygtty.input.avail"
 #define OUTPUT_MUTEX		"cygtty.output.mutex"
 #define INPUT_MUTEX		"cygtty.input.mutex"
+#define PCON_MUTEX		"cygtty.pcon.mutex"
 #define TTY_SLAVE_ALIVE		"cygtty.slave_alive"
 #define TTY_SLAVE_READING	"cygtty.slave_reading"
 
@@ -31,14 +32,13 @@ details. */
 
 typedef void *HPCON;
 
-#include <devices.h>
+#include "devices.h"
 class tty_min
 {
   pid_t sid;	/* Session ID of tty */
   struct status_flags
   {
     unsigned initialized : 1;	/* Set if tty is initialized */
-    unsigned rstcons     : 1;	/* Set if console needs to be set to "non-cooked" */
   } status;
 
 public:
@@ -47,9 +47,9 @@ public:
   fh_devices ntty;
   ULONGLONG last_ctrl_c;	/* tick count of last ctrl-c */
   bool is_console;
+  int last_sig;
 
   IMPLEMENT_STATUS_FLAG (bool, initialized)
-  IMPLEMENT_STATUS_FLAG (bool, rstcons)
 
   struct termios ti;
   struct winsize winsize;
@@ -72,7 +72,7 @@ public:
   dev_t getntty () const {return ntty;}
   _minor_t get_minor () const {return device::minor (ntty);}
   pid_t getpgid () const {return pgid;}
-  void setpgid (int pid) {pgid = pid;}
+  void setpgid (int pid);
   int getsid () const {return sid;}
   void setsid (pid_t tsid) {sid = tsid;}
   void kill_pgrp (int);
@@ -89,17 +89,31 @@ class tty: public tty_min
 public:
   pid_t master_pid;	/* PID of tty master process */
 
+  /* Transfer direction for fhandler_pty_slave::transfer_input() */
+  enum xfer_dir
+  {
+    to_cyg,
+    to_nat
+  };
+  enum cons_mode
+  {
+    restore, /* For restoring when exit from cygwin. */
+    cygwin,  /* For cygwin apps */
+    native   /* For native apps executed from cygwin. */
+  };
+
 private:
+  HANDLE _from_master_nat;
   HANDLE _from_master;
-  HANDLE _from_master_cyg;
+  HANDLE _to_master_nat;
   HANDLE _to_master;
-  HANDLE _to_master_cyg;
+  HANDLE _to_slave_nat;
   HANDLE _to_slave;
-  HANDLE _to_slave_cyg;
   bool pcon_activated;
   bool pcon_start;
+  pid_t pcon_start_pid;
   bool switch_to_pcon_in;
-  pid_t pcon_pid;
+  DWORD pcon_pid;
   UINT term_code_page;
   DWORD pcon_last_time;
   HANDLE h_pcon_write_pipe;
@@ -114,20 +128,24 @@ private:
   UINT previous_code_page;
   UINT previous_output_code_page;
   bool master_is_running_as_service;
+  bool req_xfer_input;
+  xfer_dir pcon_input_state;
+  bool mask_flusho;
+  bool discard_input;
 
 public:
+  HANDLE from_master_nat () const { return _from_master_nat; }
   HANDLE from_master () const { return _from_master; }
-  HANDLE from_master_cyg () const { return _from_master_cyg; }
+  HANDLE to_master_nat () const { return _to_master_nat; }
   HANDLE to_master () const { return _to_master; }
-  HANDLE to_master_cyg () const { return _to_master_cyg; }
+  HANDLE to_slave_nat () const { return _to_slave_nat; }
   HANDLE to_slave () const { return _to_slave; }
-  HANDLE to_slave_cyg () const { return _to_slave_cyg; }
+  void set_from_master_nat (HANDLE h) { _from_master_nat = h; }
   void set_from_master (HANDLE h) { _from_master = h; }
-  void set_from_master_cyg (HANDLE h) { _from_master_cyg = h; }
+  void set_to_master_nat (HANDLE h) { _to_master_nat = h; }
   void set_to_master (HANDLE h) { _to_master = h; }
-  void set_to_master_cyg (HANDLE h) { _to_master_cyg = h; }
+  void set_to_slave_nat (HANDLE h) { _to_slave_nat = h; }
   void set_to_slave (HANDLE h) { _to_slave = h; }
-  void set_to_slave_cyg (HANDLE h) { _to_slave_cyg = h; }
 
   int read_retval;
   bool was_opened;	/* True if opened at least once. */
@@ -148,9 +166,12 @@ public:
   static void __stdcall create_master (int);
   static void __stdcall init_session ();
   void wait_pcon_fwd (bool init = true);
+  bool pcon_input_state_eq (xfer_dir x) { return pcon_input_state == x; }
+  bool pcon_fg (pid_t pgid);
   friend class fhandler_pty_common;
   friend class fhandler_pty_master;
   friend class fhandler_pty_slave;
+  friend class tty_min;
 };
 
 class tty_list

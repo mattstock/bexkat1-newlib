@@ -1595,7 +1595,7 @@ pthread_rwlock::add_reader ()
 {
   RWLOCK_READER *rd = new RWLOCK_READER;
   if (rd)
-    List_insert (readers, rd);
+    List_insert_nolock (readers, rd);
   return rd;
 }
 
@@ -2165,7 +2165,7 @@ pthread::atfork (void (*prepare)(void), void (*parent)(void), void (*child)(void
   if (prepcb)
   {
     prepcb->cb = prepare;
-    List_insert (MT_INTERFACE->pthread_prepare, prepcb);
+    List_insert_nolock (MT_INTERFACE->pthread_prepare, prepcb);
   }
   if (parentcb)
   {
@@ -2174,7 +2174,7 @@ pthread::atfork (void (*prepare)(void), void (*parent)(void), void (*child)(void
     while (*t)
       t = &(*t)->next;
     /* t = pointer to last next in the list */
-    List_insert (*t, parentcb);
+    List_insert_nolock (*t, parentcb);
   }
   if (childcb)
   {
@@ -2183,7 +2183,7 @@ pthread::atfork (void (*prepare)(void), void (*parent)(void), void (*child)(void
     while (*t)
       t = &(*t)->next;
     /* t = pointer to last next in the list */
-    List_insert (*t, childcb);
+    List_insert_nolock (*t, childcb);
   }
   return 0;
 }
@@ -2965,12 +2965,30 @@ __pthread_cond_wait_init (pthread_cond_t *cond, pthread_mutex_t *mutex)
   return 0;
 }
 
-extern "C" int
-pthread_cond_timedwait (pthread_cond_t *cond, pthread_mutex_t *mutex,
-			const struct timespec *abstime)
+static int
+__pthread_cond_clockwait (pthread_cond_t *cond, pthread_mutex_t *mutex,
+			  clockid_t clock_id, const struct timespec *abstime)
 {
   int err = 0;
   LARGE_INTEGER timeout;
+
+  do
+    {
+      err = pthread_convert_abstime (clock_id, abstime, &timeout);
+      if (err)
+	break;
+
+      err = (*cond)->wait (*mutex, &timeout);
+    }
+  while (err == ETIMEDOUT);
+  return err;
+}
+
+extern "C" int
+pthread_cond_clockwait (pthread_cond_t *cond, pthread_mutex_t *mutex,
+			clockid_t clock_id, const struct timespec *abstime)
+{
+  int err = 0;
 
   pthread_testcancel ();
 
@@ -2979,16 +2997,30 @@ pthread_cond_timedwait (pthread_cond_t *cond, pthread_mutex_t *mutex,
       err = __pthread_cond_wait_init (cond, mutex);
       if (err)
 	__leave;
+      err = __pthread_cond_clockwait (cond, mutex, clock_id, abstime);
+    }
+  __except (NO_ERROR)
+    {
+      return EINVAL;
+    }
+  __endtry
+  return err;
+}
 
-      do
-	{
-	  err = pthread_convert_abstime ((*cond)->clock_id, abstime, &timeout);
-	  if (err)
-	    __leave;
+extern "C" int
+pthread_cond_timedwait (pthread_cond_t *cond, pthread_mutex_t *mutex,
+			const struct timespec *abstime)
+{
+  int err = 0;
 
-	  err = (*cond)->wait (*mutex, &timeout);
-	}
-      while (err == ETIMEDOUT);
+  pthread_testcancel ();
+
+  __try
+    {
+      err = __pthread_cond_wait_init (cond, mutex);
+      if (err)
+	__leave;
+      err = __pthread_cond_clockwait (cond, mutex, (*cond)->clock_id, abstime);
     }
   __except (NO_ERROR)
     {
@@ -3142,7 +3174,7 @@ pthread_rwlock_rdlock (pthread_rwlock_t *rwlock)
 }
 
 extern "C" int
-pthread_rwlock_timedrdlock (pthread_rwlock_t *rwlock,
+pthread_rwlock_clockrdlock (pthread_rwlock_t *rwlock, clockid_t clock_id,
 			    const struct timespec *abstime)
 {
   LARGE_INTEGER timeout;
@@ -3161,7 +3193,7 @@ pthread_rwlock_timedrdlock (pthread_rwlock_t *rwlock,
 
   __try
     {
-      int err = pthread_convert_abstime (CLOCK_REALTIME, abstime, &timeout);
+      int err = pthread_convert_abstime (clock_id, abstime, &timeout);
       if (err)
 	return err;
 
@@ -3170,6 +3202,13 @@ pthread_rwlock_timedrdlock (pthread_rwlock_t *rwlock,
   __except (NO_ERROR) {}
   __endtry
   return EINVAL;
+}
+
+extern "C" int
+pthread_rwlock_timedrdlock (pthread_rwlock_t *rwlock,
+			    const struct timespec *abstime)
+{
+  return pthread_rwlock_clockrdlock (rwlock, CLOCK_REALTIME, abstime);
 }
 
 extern "C" int
@@ -3197,7 +3236,7 @@ pthread_rwlock_wrlock (pthread_rwlock_t *rwlock)
 }
 
 extern "C" int
-pthread_rwlock_timedwrlock (pthread_rwlock_t *rwlock,
+pthread_rwlock_clockwrlock (pthread_rwlock_t *rwlock, clockid_t clock_id,
 			    const struct timespec *abstime)
 {
   LARGE_INTEGER timeout;
@@ -3216,7 +3255,7 @@ pthread_rwlock_timedwrlock (pthread_rwlock_t *rwlock,
 
   __try
     {
-      int err = pthread_convert_abstime (CLOCK_REALTIME, abstime, &timeout);
+      int err = pthread_convert_abstime (clock_id, abstime, &timeout);
       if (err)
 	return err;
 
@@ -3225,6 +3264,13 @@ pthread_rwlock_timedwrlock (pthread_rwlock_t *rwlock,
   __except (NO_ERROR) {}
   __endtry
   return EINVAL;
+}
+
+extern "C" int
+pthread_rwlock_timedwrlock (pthread_rwlock_t *rwlock,
+			    const struct timespec *abstime)
+{
+  return pthread_rwlock_clockwrlock (rwlock, CLOCK_REALTIME, abstime);
 }
 
 extern "C" int
@@ -3443,7 +3489,8 @@ pthread_mutex_lock (pthread_mutex_t *mutex)
 }
 
 extern "C" int
-pthread_mutex_timedlock (pthread_mutex_t *mutex, const struct timespec *abstime)
+pthread_mutex_clocklock (pthread_mutex_t *mutex, clockid_t clock_id,
+			 const struct timespec *abstime)
 {
   LARGE_INTEGER timeout;
 
@@ -3459,7 +3506,7 @@ pthread_mutex_timedlock (pthread_mutex_t *mutex, const struct timespec *abstime)
 
   __try
     {
-      int err = pthread_convert_abstime (CLOCK_REALTIME, abstime, &timeout);
+      int err = pthread_convert_abstime (clock_id, abstime, &timeout);
       if (err)
 	return err;
 
@@ -3468,6 +3515,12 @@ pthread_mutex_timedlock (pthread_mutex_t *mutex, const struct timespec *abstime)
   __except (NO_ERROR) {}
   __endtry
   return EINVAL;
+}
+
+extern "C" int
+pthread_mutex_timedlock (pthread_mutex_t *mutex, const struct timespec *abstime)
+{
+  return pthread_mutex_clocklock (mutex, CLOCK_REALTIME, abstime);
 }
 
 extern "C" int
@@ -4002,7 +4055,8 @@ semaphore::trywait (sem_t *sem)
 }
 
 int
-semaphore::timedwait (sem_t *sem, const struct timespec *abstime)
+semaphore::clockwait (sem_t *sem, clockid_t clock_id,
+		      const struct timespec *abstime)
 {
   LARGE_INTEGER timeout;
 
@@ -4019,7 +4073,7 @@ semaphore::timedwait (sem_t *sem, const struct timespec *abstime)
 
   __try
     {
-      int err = pthread_convert_abstime (CLOCK_REALTIME, abstime, &timeout);
+      int err = pthread_convert_abstime (clock_id, abstime, &timeout);
       if (err)
 	return err;
 

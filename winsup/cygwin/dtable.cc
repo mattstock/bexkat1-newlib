@@ -406,8 +406,14 @@ dtable::init_std_file_from_handle (int fd, HANDLE handle)
 	}
       if (!fh->init (handle, access, bin))
 	api_fatal ("couldn't initialize fd %d for %s", fd, fh->get_name ());
+      if (fh->ispipe ())
+	{
+	  fhandler_pipe *fhp = (fhandler_pipe *) fh;
+	  fhp->set_pipe_buf_size ();
+	}
 
-      fh->open_setup (openflags);
+      if (!fh->open_setup (openflags))
+	api_fatal ("open_setup failed, %E");
       fh->usecount = 0;
       cygheap->fdtab[fd] = fh;
       cygheap->fdtab[fd]->inc_refcnt ();
@@ -581,6 +587,9 @@ fh_alloc (path_conv& pc)
 	case FH_TIMERFD:
 	  fh = cnew (fhandler_timerfd);
 	  break;
+	case FH_MQUEUE:
+	  fh = cnew (fhandler_mqueue);
+	  break;
 	case FH_TTY:
 	  if (!pc.isopen ())
 	    {
@@ -687,7 +696,7 @@ dtable::dup_worker (fhandler_base *oldfh, int flags)
       if (!oldfh->archetype)
 	newfh->set_handle (NULL);
 
-      newfh->pc.reset_conv_handle ();
+      newfh->pc.close_conv_handle ();
       if (oldfh->dup (newfh, flags))
 	{
 	  delete newfh;

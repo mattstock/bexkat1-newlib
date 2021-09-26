@@ -95,7 +95,7 @@ close_all_files (bool norelease)
       if (cfd >= 0)
 	{
 	  debug_only_printf ("closing fd %d", i);
-	  if (i == 2)
+	  if (i == 2 && cfd->get_dev () != FH_PIPEW)
 	    DuplicateHandle (GetCurrentProcess (), cfd->get_output_handle (),
 			     GetCurrentProcess (), &h,
 			     0, false, DUPLICATE_SAME_ACCESS);
@@ -108,7 +108,6 @@ close_all_files (bool norelease)
   if (!have_execed && cygheap->ctty)
     cygheap->close_ctty ();
 
-  fhandler_base_overlapped::flush_all_async_io ();
   if (h)
     SetStdHandle (STD_ERROR_HANDLE, h);
   cygheap->fdtab.unlock ();
@@ -561,7 +560,7 @@ try_to_bin (path_conv &pc, HANDLE &fh, ACCESS_MASK access, ULONG flags)
     {
       /* In the remote case we need the full path, but recycler is only
 	 a relative path.  Convert to absolute path. */
-      RtlInitEmptyUnicodeString (&fname, (PCWSTR) tp.w_get (),
+      RtlInitEmptyUnicodeString (&fname, tp.w_get (),
 				 (NT_MAX_PATH - 1) * sizeof (WCHAR));
       RtlCopyUnicodeString (&fname, pc.get_nt_native_path ());
       RtlSplitUnicodePath (&fname, &fname, NULL);
@@ -1487,8 +1486,15 @@ open (const char *unix_path, int flags, ...)
 	  opt |= PC_CTTY;
 	}
 
+      /* If we're opening a FIFO, we will call device_access_denied
+	 below.  This leads to a call to fstat, which can use the
+	 path_conv handle. */
+      opt |= PC_KEEP_HANDLE;
       if (!(fh = build_fh_name (unix_path, opt, stat_suffixes)))
 	__leave;		/* errno already set */
+      opt &= ~PC_KEEP_HANDLE;
+      if (!fh->isfifo ())
+	fh->pc.close_conv_handle ();
       if ((flags & O_NOFOLLOW) && fh->issymlink () && !(flags & O_PATH))
 	{
 	  set_errno (ELOOP);
@@ -1555,9 +1561,18 @@ open (const char *unix_path, int flags, ...)
 	  delete fh;
 	  fh = fh_file;
 	}
-      else if ((fh->is_fs_special () && fh->device_access_denied (flags))
-	       || !fh->open_with_arch (flags, mode & 07777))
-	__leave;		/* errno already set */
+      else
+	{
+	  if (fh->is_fs_special ())
+	    {
+	      if (fh->device_access_denied (flags))
+		__leave;	/* errno already set */
+	      else if (fh->isfifo ())
+		fh->pc.close_conv_handle ();
+	    }
+	  if (!fh->open_with_arch (flags, mode & 07777))
+	    __leave;		/* errno already set */
+	}
       /* Move O_TMPFILEs to the bin to avoid blocking the parent dir. */
       if ((flags & O_TMPFILE) && !fh->pc.isremote ())
 	try_to_bin (fh->pc, fh->get_handle (), DELETE,
@@ -2034,19 +2049,35 @@ sync ()
       return;
     }
   /* Traverse \Device directory ... */
-  PDIRECTORY_BASIC_INFORMATION dbi = (PDIRECTORY_BASIC_INFORMATION)
-				     alloca (640);
+  tmp_pathbuf tp;
+  PDIRECTORY_BASIC_INFORMATION dbi_buf = (PDIRECTORY_BASIC_INFORMATION)
+					 tp.w_get ();
   BOOLEAN restart = TRUE;
+  bool last_run = false;
   ULONG context = 0;
-  while (NT_SUCCESS (NtQueryDirectoryObject (devhdl, dbi, 640, TRUE, restart,
-					     &context, NULL)))
+  while (!last_run)
     {
+      status = NtQueryDirectoryObject (devhdl, dbi_buf, 65536, FALSE, restart,
+				       &context, NULL);
+      if (!NT_SUCCESS (status))
+	{
+	  debug_printf ("NtQueryDirectoryObject, status %y", status);
+	  break;
+	}
+      if (status != STATUS_MORE_ENTRIES)
+	last_run = true;
       restart = FALSE;
-      /* ... and call sync_worker for each HarddiskVolumeX entry. */
-      if (dbi->ObjectName.Length >= 15 * sizeof (WCHAR)
-	  && !wcsncasecmp (dbi->ObjectName.Buffer, L"HarddiskVolume", 14)
-	  && iswdigit (dbi->ObjectName.Buffer[14]))
-	sync_worker (devhdl, dbi->ObjectName.Length, dbi->ObjectName.Buffer);
+      for (PDIRECTORY_BASIC_INFORMATION dbi = dbi_buf;
+	   dbi->ObjectName.Length > 0;
+	   dbi++)
+	{
+	  /* ... and call sync_worker for each HarddiskVolumeX entry. */
+	  if (dbi->ObjectName.Length >= 15 * sizeof (WCHAR)
+	      && !wcsncasecmp (dbi->ObjectName.Buffer, L"HarddiskVolume", 14)
+	      && iswdigit (dbi->ObjectName.Buffer[14]))
+	    sync_worker (devhdl, dbi->ObjectName.Length,
+			 dbi->ObjectName.Buffer);
+	}
     }
   NtClose (devhdl);
 }
@@ -4946,6 +4977,8 @@ linkat (int olddirfd, const char *oldpathname,
 	int flags)
 {
   tmp_pathbuf tp;
+  fhandler_base *fh = NULL;
+
   __try
     {
       if (flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH))
@@ -4954,21 +4987,25 @@ linkat (int olddirfd, const char *oldpathname,
 	  __leave;
 	}
       char *oldpath = tp.c_get ();
-      /* AT_EMPTY_PATH with an empty oldpathname is equivalent to
-
-	   linkat(AT_FDCWD, "/proc/self/fd/<olddirfd>", newdirfd,
-		  newname, AT_SYMLINK_FOLLOW);
-
-	 Convert the request accordingly. */
       if ((flags & AT_EMPTY_PATH) && oldpathname && oldpathname[0] == '\0')
 	{
+	  /* Operate directly on olddirfd, which can be anything
+	     except a directory. */
 	  if (olddirfd == AT_FDCWD)
 	    {
 	      set_errno (EPERM);
 	      __leave;
 	    }
-	  __small_sprintf (oldpath, "/proc/%d/fd/%d", myself->pid, olddirfd);
-	  flags = AT_SYMLINK_FOLLOW;
+	  cygheap_fdget cfd (olddirfd);
+	  if (cfd < 0)
+	    __leave;
+	  if (cfd->pc.isdir ())
+	    {
+	      set_errno (EPERM);
+	      __leave;
+	    }
+	  fh = cfd;
+	  flags = 0;		/* In case AT_SYMLINK_FOLLOW was set. */
 	}
       else if (gen_full_path_at (oldpath, olddirfd, oldpathname))
 	__leave;
@@ -4987,6 +5024,8 @@ linkat (int olddirfd, const char *oldpathname,
 	    }
 	  strcpy (oldpath, old_name.get_posix ());
 	}
+      if (fh)
+	return fh->link (newpath);
       return link (oldpath, newpath);
     }
   __except (EFAULT) {}
@@ -5178,6 +5217,7 @@ pipe_worker (int filedes[2], unsigned int psize, int mode)
   return res;
 }
 
+/* MS compatible version of pipe.  Hopefully nobody is using it... */
 extern "C" int
 _pipe (int filedes[2], unsigned int psize, int mode)
 {
@@ -5225,3 +5265,24 @@ pipe2 (int filedes[2], int mode)
   syscall_printf ("%R = pipe2([%d, %d], %y)", res, read, write, mode);
   return res;
 }
+
+extern "C" FILE *
+tmpfile (void)
+{
+  char *dir = getenv ("TMPDIR");
+  if (!dir)
+    dir = P_tmpdir;
+  int fd = open (dir, O_RDWR | O_BINARY | O_TMPFILE, S_IRUSR | S_IWUSR);
+  if (fd < 0)
+    return NULL;
+  FILE *fp = fdopen (fd, "wb+");
+  int e = errno;
+  if (!fp)
+    close (fd); // ..will remove tmp file
+  set_errno (e);
+  return fp;
+}
+
+#ifdef __i386__
+EXPORT_ALIAS (tmpfile, tmpfile64)
+#endif

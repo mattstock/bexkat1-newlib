@@ -128,13 +128,12 @@ STATUS_PIPE_EMPTY simply means there's no data to be read. */
 static NO_COPY fifo_reader_id_t null_fr_id = { .winpid = 0, .fh = NULL };
 
 fhandler_fifo::fhandler_fifo ():
-  fhandler_base (),
+  fhandler_pipe_fifo (),
   read_ready (NULL), write_ready (NULL), writer_opening (NULL),
   owner_needed_evt (NULL), owner_found_evt (NULL), update_needed_evt (NULL),
   cancel_evt (NULL), thr_sync_evt (NULL), pipe_name_buf (NULL),
   fc_handler (NULL), shandlers (0), nhandlers (0),
   reader (false), writer (false), duplexer (false),
-  max_atomic_write (DEFAULT_PIPEBUFSIZE),
   me (null_fr_id), shmem_handle (NULL), shmem (NULL),
   shared_fc_hdl (NULL), shared_fc_handler (NULL)
 {
@@ -193,36 +192,6 @@ set_pipe_non_blocking (HANDLE ph, bool nonblocking)
 				 FilePipeInformation);
   if (!NT_SUCCESS (status))
     debug_printf ("NtSetInformationFile(FilePipeInformation): %y", status);
-}
-
-NTSTATUS
-fhandler_fifo::npfs_handle (HANDLE &nph)
-{
-  static NO_COPY SRWLOCK npfs_lock;
-  static NO_COPY HANDLE npfs_dirh;
-
-  NTSTATUS status = STATUS_SUCCESS;
-  OBJECT_ATTRIBUTES attr;
-  IO_STATUS_BLOCK io;
-
-  /* Lockless after first call. */
-  if (npfs_dirh)
-    {
-      nph = npfs_dirh;
-      return STATUS_SUCCESS;
-    }
-  AcquireSRWLockExclusive (&npfs_lock);
-  if (!npfs_dirh)
-    {
-      InitializeObjectAttributes (&attr, &ro_u_npfs, 0, NULL, NULL);
-      status = NtOpenFile (&npfs_dirh, FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-			   &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
-			   0);
-    }
-  ReleaseSRWLockExclusive (&npfs_lock);
-  if (NT_SUCCESS (status))
-    nph = npfs_dirh;
-  return status;
 }
 
 /* Called when a FIFO is first opened for reading and again each time
@@ -284,7 +253,7 @@ fhandler_fifo::open_pipe (HANDLE& ph)
   status = npfs_handle (npfsh);
   if (!NT_SUCCESS (status))
     return status;
-  access = GENERIC_WRITE | SYNCHRONIZE;
+  access = GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
   InitializeObjectAttributes (&attr, get_pipe_name (),
 			      openflags & O_CLOEXEC ? 0 : OBJ_INHERIT,
 			      npfsh, NULL);
@@ -1078,6 +1047,11 @@ writer_shmem:
   ResetEvent (writer_opening);
   nwriters_unlock ();
 success:
+  if (!select_sem)
+    {
+      __small_sprintf (npbuf, "semaphore.%08x.%016X", get_dev (), get_ino ());
+      select_sem = CreateSemaphore (sa_buf, 0, INT32_MAX, npbuf);
+    }
   return 1;
 err_close_reader:
   saved_errno = get_errno ();
@@ -1168,99 +1142,6 @@ fhandler_fifo::wait (HANDLE h)
    }
 }
 
-ssize_t __reg3
-fhandler_fifo::raw_write (const void *ptr, size_t len)
-{
-  ssize_t ret = -1;
-  size_t nbytes = 0;
-  ULONG chunk;
-  NTSTATUS status = STATUS_SUCCESS;
-  IO_STATUS_BLOCK io;
-  HANDLE evt = NULL;
-
-  if (!len)
-    return 0;
-
-  if (len <= max_atomic_write)
-    chunk = len;
-  else if (is_nonblocking ())
-    chunk = len = max_atomic_write;
-  else
-    chunk = max_atomic_write;
-
-  /* Create a wait event if the FIFO is in blocking mode. */
-  if (!is_nonblocking () && !(evt = CreateEvent (NULL, false, false, NULL)))
-    {
-      __seterrno ();
-      return -1;
-    }
-
-  /* Write in chunks, accumulating a total.  If there's an error, just
-     return the accumulated total unless the first write fails, in
-     which case return -1. */
-  while (nbytes < len)
-    {
-      ULONG_PTR nbytes_now = 0;
-      size_t left = len - nbytes;
-      ULONG len1;
-      DWORD waitret = WAIT_OBJECT_0;
-
-      if (left > chunk)
-	len1 = chunk;
-      else
-	len1 = (ULONG) left;
-      nbytes_now = 0;
-      status = NtWriteFile (get_handle (), evt, NULL, NULL, &io,
-			    (PVOID) ptr, len1, NULL, NULL);
-      if (evt && status == STATUS_PENDING)
-	{
-	  waitret = cygwait (evt);
-	  if (waitret == WAIT_OBJECT_0)
-	    status = io.Status;
-	}
-      if (waitret == WAIT_CANCELED)
-	status = STATUS_THREAD_CANCELED;
-      else if (waitret == WAIT_SIGNALED)
-	status = STATUS_THREAD_SIGNALED;
-      else if (isclosed ())  /* A signal handler might have closed the fd. */
-	{
-	  if (waitret == WAIT_OBJECT_0)
-	    set_errno (EBADF);
-	  else
-	    __seterrno ();
-	}
-      else if (NT_SUCCESS (status))
-	{
-	  nbytes_now = io.Information;
-	  /* NtWriteFile returns success with # of bytes written == 0
-	     if writing on a non-blocking pipe fails because the pipe
-	     buffer doesn't have sufficient space. */
-	  if (nbytes_now == 0)
-	    set_errno (EAGAIN);
-	  ptr = ((char *) ptr) + chunk;
-	  nbytes += nbytes_now;
-	}
-      else if (STATUS_PIPE_IS_CLOSED (status))
-	{
-	  set_errno (EPIPE);
-	  raise (SIGPIPE);
-	}
-      else
-	__seterrno_from_nt_status (status);
-      if (nbytes_now == 0)
-	len = 0;		/* Terminate loop. */
-      if (nbytes > 0)
-	ret = nbytes;
-    }
-  if (evt)
-    NtClose (evt);
-  if (status == STATUS_THREAD_SIGNALED && ret < 0)
-    set_errno (EINTR);
-  else if (status == STATUS_THREAD_CANCELED)
-    pthread::static_cancel_self ();
-  return ret;
-}
-
 /* Called from raw_read and select.cc:peek_fifo. */
 int
 fhandler_fifo::take_ownership (DWORD timeout)
@@ -1302,6 +1183,22 @@ fhandler_fifo::take_ownership (DWORD timeout)
       break;
     }
   return ret;
+}
+
+void
+fhandler_fifo::release_select_sem (const char *from)
+{
+  LONG n_release;
+  if (reader) /* Number of select() call. */
+    n_release = get_obj_handle_count (select_sem)
+      - get_obj_handle_count (read_ready);
+  else /* Number of select() and reader */
+    n_release = get_obj_handle_count (select_sem)
+      - get_obj_handle_count (get_handle ());
+  debug_printf("%s(%s) release %d", from,
+	       reader ? "reader" : "writer", n_release);
+  if (n_release)
+    ReleaseSemaphore (select_sem, n_release, NULL);
 }
 
 void __reg3
@@ -1357,9 +1254,7 @@ fhandler_fifo::raw_read (void *in_ptr, size_t& len)
 	      if (io.Information > 0)
 		{
 		  len = io.Information;
-		  fifo_client_unlock ();
-		  reading_unlock ();
-		  return;
+		  goto out;
 		}
 	      break;
 	    case STATUS_PIPE_EMPTY:
@@ -1395,9 +1290,7 @@ fhandler_fifo::raw_read (void *in_ptr, size_t& len)
 		    if (j < nhandlers)
 		      fc_handler[j].last_read = false;
 		    fc_handler[i].last_read = true;
-		    fifo_client_unlock ();
-		    reading_unlock ();
-		    return;
+		    goto out;
 		  }
 		break;
 	      case STATUS_PIPE_EMPTY:
@@ -1434,9 +1327,7 @@ fhandler_fifo::raw_read (void *in_ptr, size_t& len)
 		    if (j < nhandlers)
 		      fc_handler[j].last_read = false;
 		    fc_handler[i].last_read = true;
-		    fifo_client_unlock ();
-		    reading_unlock ();
-		    return;
+		    goto out;
 		  }
 		break;
 	      case STATUS_PIPE_EMPTY:
@@ -1469,7 +1360,7 @@ maybe_retry:
       else
 	{
 	  /* Allow interruption and don't hog the CPU. */
-	  DWORD waitret = cygwait (NULL, 1, cw_cancel | cw_sig_eintr);
+	  DWORD waitret = cygwait (select_sem, 1, cw_cancel | cw_sig_eintr);
 	  if (waitret == WAIT_CANCELED)
 	    pthread::static_cancel_self ();
 	  else if (waitret == WAIT_SIGNALED)
@@ -1492,6 +1383,35 @@ maybe_retry:
     }
 errout:
   len = (size_t) -1;
+  return;
+out:
+  fifo_client_unlock ();
+  reading_unlock ();
+  if (select_sem)
+    release_select_sem ("raw_read");
+}
+
+int __reg2
+fhandler_fifo::fstat (struct stat *buf)
+{
+  if (reader || writer || duplexer)
+    {
+      /* fhandler_fifo::open has been called, and O_PATH is not set.
+	 We don't want to call fhandler_base::fstat.  In the writer
+	 and duplexer cases we have a handle, but it's a pipe handle
+	 rather than a file handle, so it's not suitable for stat.  In
+	 the reader case we don't have a handle, but
+	 fhandler_base::fstat would call fhandler_base::open, which
+	 would modify the flags and status_flags. */
+      fhandler_disk_file fh (pc);
+      fh.get_device () = FH_FS;
+      int res = fh.fstat (buf);
+      buf->st_dev = buf->st_rdev = dev ();
+      buf->st_mode = dev ().mode ();
+      buf->st_size = 0;
+      return res;
+    }
+  return fhandler_base::fstat (buf);
 }
 
 int __reg2
@@ -1579,6 +1499,11 @@ fhandler_fifo::cancel_reader_thread ()
 int
 fhandler_fifo::close ()
 {
+  if (select_sem)
+    {
+      release_select_sem ("close");
+      NtClose (select_sem);
+    }
   if (writer)
     {
       nwriters_lock ();
@@ -1735,6 +1660,14 @@ fhandler_fifo::dup (fhandler_base *child, int flags)
     }
   if (fhf->reopen_shmem () < 0)
     goto err_close_shmem_handle;
+  if (select_sem &&
+      !DuplicateHandle (GetCurrentProcess (), select_sem,
+			GetCurrentProcess (), &fhf->select_sem,
+			0, !(flags & O_CLOEXEC), DUPLICATE_SAME_ACCESS))
+    {
+      __seterrno ();
+      goto err_close_shmem;
+    }
   if (reader)
     {
       /* Make sure the child starts unlocked. */
@@ -1749,7 +1682,7 @@ fhandler_fifo::dup (fhandler_base *child, int flags)
 			    0, !(flags & O_CLOEXEC), DUPLICATE_SAME_ACCESS))
 	{
 	  __seterrno ();
-	  goto err_close_shmem;
+	  goto err_close_select_sem;
 	}
       if (fhf->reopen_shared_fc_handler () < 0)
 	goto err_close_shared_fc_hdl;
@@ -1797,6 +1730,8 @@ err_close_shared_fc_handler:
   NtUnmapViewOfSection (GetCurrentProcess (), fhf->shared_fc_handler);
 err_close_shared_fc_hdl:
   NtClose (fhf->shared_fc_hdl);
+err_close_select_sem:
+  NtClose (fhf->select_sem);
 err_close_shmem:
   NtUnmapViewOfSection (GetCurrentProcess (), fhf->shmem);
 err_close_shmem_handle:
@@ -1821,6 +1756,8 @@ fhandler_fifo::fixup_after_fork (HANDLE parent)
   fork_fixup (parent, shmem_handle, "shmem_handle");
   if (reopen_shmem () < 0)
     api_fatal ("Can't reopen shared memory during fork, %E");
+  if (select_sem)
+    fork_fixup (parent, select_sem, "select_sem");
   if (reader)
     {
       /* Make sure the child starts unlocked. */
@@ -1896,4 +1833,6 @@ fhandler_fifo::set_close_on_exec (bool val)
 	set_no_inheritance (fc_handler[i].h, val);
       fifo_client_unlock ();
     }
+  if (select_sem)
+    set_no_inheritance (select_sem, val);
 }

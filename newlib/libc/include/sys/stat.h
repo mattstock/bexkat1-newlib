@@ -50,7 +50,7 @@ struct	stat
 #endif
 };
 
-#if !(defined(__svr4__) && !defined(__PPC__) && !defined(__sun__)) && !defined(__cris__)
+#if !(defined(__svr4__) && !defined(__PPC__) && !defined(__sun__))
 #define st_atime st_atim.tv_sec
 #define st_ctime st_ctim.tv_sec
 #define st_mtime st_mtim.tv_sec
@@ -128,7 +128,7 @@ struct	stat
 #define	S_ISLNK(m)	(((m)&_IFMT) == _IFLNK)
 #define	S_ISSOCK(m)	(((m)&_IFMT) == _IFSOCK)
 
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(__rtems__)
 /* Special tv_nsec values for futimens(2) and utimensat(2). */
 #define UTIME_NOW	-2L
 #define UTIME_OMIT	-1L

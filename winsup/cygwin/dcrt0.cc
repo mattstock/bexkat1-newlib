@@ -33,7 +33,7 @@ details. */
 #include "tls_pbuf.h"
 #include "exception.h"
 #include "cygxdr.h"
-#include "fenv.h"
+#include <fenv.h>
 #include "ntdll.h"
 
 #define MAX_AT_FILE_LEVEL 10
@@ -722,9 +722,18 @@ init_windows_system_directory ()
 	api_fatal ("can't find windows system directory");
       windows_system_directory[windows_system_directory_length++] = L'\\';
       windows_system_directory[windows_system_directory_length] = L'\0';
+      /* We need the Windows dir with NT prefix in path.cc.  Note that we
+	 don't append a backslash, because we need the dir without backslash
+	 for the environment. */
+      wcpcpy (windows_directory_buf, L"\\??\\");
+      windows_directory_length =
+	    GetSystemWindowsDirectoryW (windows_directory, MAX_PATH - 4);
+      RtlInitCountedUnicodeString (&windows_directory_path,
+	    windows_directory_buf,
+	    (windows_directory_length + 4) * sizeof (WCHAR));
 #ifdef __i386__
       system_wow64_directory_length =
-	GetSystemWow64DirectoryW (system_wow64_directory, MAX_PATH);
+	    GetSystemWow64DirectoryW (system_wow64_directory, MAX_PATH);
       if (system_wow64_directory_length)
 	{
 	  system_wow64_directory[system_wow64_directory_length++] = L'\\';
@@ -1085,7 +1094,7 @@ _dll_crt0 ()
     fork_info->alloc_stack ();
 #endif
 
-  _feinitialise ();
+  fesetenv (FE_DFL_ENV);
   _main_tls = &_my_tls;
   _main_tls->call ((DWORD (*) (void *, void *)) dll_crt0_1, NULL);
 }

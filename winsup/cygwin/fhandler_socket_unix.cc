@@ -805,36 +805,6 @@ fhandler_socket_unix::recv_peer_info ()
   return ret;
 }
 
-NTSTATUS
-fhandler_socket_unix::npfs_handle (HANDLE &nph)
-{
-  static NO_COPY SRWLOCK npfs_lock;
-  static NO_COPY HANDLE npfs_dirh;
-
-  NTSTATUS status = STATUS_SUCCESS;
-  OBJECT_ATTRIBUTES attr;
-  IO_STATUS_BLOCK io;
-
-  /* Lockless after first call. */
-  if (npfs_dirh)
-    {
-      nph = npfs_dirh;
-      return STATUS_SUCCESS;
-    }
-  AcquireSRWLockExclusive (&npfs_lock);
-  if (!npfs_dirh)
-    {
-      InitializeObjectAttributes (&attr, &ro_u_npfs, 0, NULL, NULL);
-      status = NtOpenFile (&npfs_dirh, FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-			   &attr, &io, FILE_SHARE_READ | FILE_SHARE_WRITE,
-			   0);
-    }
-  ReleaseSRWLockExclusive (&npfs_lock);
-  if (NT_SUCCESS (status))
-    nph = npfs_dirh;
-  return status;
-}
-
 HANDLE
 fhandler_socket_unix::create_pipe (bool single_instance)
 {
@@ -1208,6 +1178,11 @@ fhandler_socket_unix::~fhandler_socket_unix ()
 int
 fhandler_socket_unix::dup (fhandler_base *child, int flags)
 {
+  if (get_flags () & O_PATH)
+    /* We're viewing the socket as a disk file, but fhandler_base::dup
+       suffices here. */
+    return fhandler_base::dup (child, flags);
+
   if (fhandler_socket::dup (child, flags))
     {
       __seterrno ();
@@ -1691,6 +1666,13 @@ fhandler_socket_unix::connect (const struct sockaddr *name, int namelen)
       conn_unlock ();
       return -1;
     }
+  if (name->sa_family == AF_UNSPEC && get_socket_type () == SOCK_DGRAM)
+    {
+      connect_state (unconnected);
+      peer_sun_path (NULL);
+      conn_unlock ();
+      return 0;
+    }
   connect_state (connect_pending);
   conn_unlock ();
   /* Check validity of name */
@@ -1802,8 +1784,22 @@ fhandler_socket_unix::shutdown (int how)
 }
 
 int
+fhandler_socket_unix::open (int flags, mode_t mode)
+{
+  /* We don't support opening sockets unless O_PATH is specified. */
+  if (flags & O_PATH)
+    return open_fs (flags, mode);
+
+  set_errno (EOPNOTSUPP);
+  return 0;
+}
+
+int
 fhandler_socket_unix::close ()
 {
+  if (get_flags () & O_PATH)
+    return fhandler_base::close ();
+
   HANDLE evt = InterlockedExchangePointer (&cwt_termination_evt, NULL);
   HANDLE thr = InterlockedExchangePointer (&connect_wait_thr, NULL);
   if (thr)
@@ -2281,6 +2277,11 @@ fhandler_socket_unix::ioctl (unsigned int cmd, void *p)
 int
 fhandler_socket_unix::fcntl (int cmd, intptr_t arg)
 {
+  if (get_flags () & O_PATH)
+    /* We're viewing the socket as a disk file, but
+       fhandler_base::fcntl suffices here. */
+    return fhandler_base::fcntl (cmd, arg);
+
   int ret = -1;
 
   switch (cmd)
@@ -2313,13 +2314,12 @@ fhandler_socket_unix::fcntl (int cmd, intptr_t arg)
 int __reg2
 fhandler_socket_unix::fstat (struct stat *buf)
 {
-  int ret = 0;
-
-  if (sun_path ()
-      && (sun_path ()->un_len <= (socklen_t) sizeof (sa_family_t)
-	  || sun_path ()->un.sun_path[0] == '\0'))
+  if (!dev ().isfs ())
+    /* fstat called on a socket. */
     return fhandler_socket::fstat (buf);
-  ret = fhandler_base::fstat_fs (buf);
+
+  /* stat/lstat on a socket file or fstat on a socket opened w/ O_PATH. */
+  int ret = fhandler_base::fstat_fs (buf);
   if (!ret)
     {
       buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFSOCK;
@@ -2331,10 +2331,18 @@ fhandler_socket_unix::fstat (struct stat *buf)
 int __reg2
 fhandler_socket_unix::fstatvfs (struct statvfs *sfs)
 {
-  if (sun_path ()
-      && (sun_path ()->un_len <= (socklen_t) sizeof (sa_family_t)
-	  || sun_path ()->un.sun_path[0] == '\0'))
+  if (!dev ().isfs ())
+    /* fstatvfs called on a socket. */
     return fhandler_socket::fstatvfs (sfs);
+
+  /* statvfs on a socket file or fstatvfs on a socket opened w/ O_PATH. */
+  if (get_flags () & O_PATH)
+    /* We already have a handle. */
+    {
+      HANDLE h = get_handle ();
+      if (h)
+	return fstatvfs_by_handle (h, sfs);
+    }
   fhandler_disk_file fh (pc);
   fh.get_device () = FH_FS;
   return fh.fstatvfs (sfs);
@@ -2343,10 +2351,12 @@ fhandler_socket_unix::fstatvfs (struct statvfs *sfs)
 int
 fhandler_socket_unix::fchmod (mode_t newmode)
 {
-  if (sun_path ()
-      && (sun_path ()->un_len <= (socklen_t) sizeof (sa_family_t)
-	  || sun_path ()->un.sun_path[0] == '\0'))
+  if (!dev ().isfs ())
+    /* fchmod called on a socket. */
     return fhandler_socket::fchmod (newmode);
+
+  /* chmod on a socket file.  [We won't get here if fchmod is called
+     on a socket opened w/ O_PATH.] */
   fhandler_disk_file fh (pc);
   fh.get_device () = FH_FS;
   /* Kludge: Don't allow to remove read bit on socket files for
@@ -2362,10 +2372,12 @@ fhandler_socket_unix::fchmod (mode_t newmode)
 int
 fhandler_socket_unix::fchown (uid_t uid, gid_t gid)
 {
-  if (sun_path ()
-      && (sun_path ()->un_len <= (socklen_t) sizeof (sa_family_t)
-	  || sun_path ()->un.sun_path[0] == '\0'))
+  if (!dev ().isfs ())
+    /* fchown called on a socket. */
     return fhandler_socket::fchown (uid, gid);
+
+  /* chown/lchown on a socket file.  [We won't get here if fchown is
+     called on a socket opened w/ O_PATH.] */
   fhandler_disk_file fh (pc);
   return fh.fchown (uid, gid);
 }
@@ -2373,10 +2385,12 @@ fhandler_socket_unix::fchown (uid_t uid, gid_t gid)
 int
 fhandler_socket_unix::facl (int cmd, int nentries, aclent_t *aclbufp)
 {
-  if (sun_path ()
-      && (sun_path ()->un_len <= (socklen_t) sizeof (sa_family_t)
-	  || sun_path ()->un.sun_path[0] == '\0'))
+  if (!dev ().isfs ())
+    /* facl called on a socket. */
     return fhandler_socket::facl (cmd, nentries, aclbufp);
+
+  /* facl on a socket file.  [We won't get here if facl is called on a
+     socket opened w/ O_PATH.] */
   fhandler_disk_file fh (pc);
   return fh.facl (cmd, nentries, aclbufp);
 }
@@ -2384,11 +2398,14 @@ fhandler_socket_unix::facl (int cmd, int nentries, aclent_t *aclbufp)
 int
 fhandler_socket_unix::link (const char *newpath)
 {
-  if (sun_path ()
-      && (sun_path ()->un_len <= (socklen_t) sizeof (sa_family_t)
-	  || sun_path ()->un.sun_path[0] == '\0'))
+  if (!dev ().isfs ())
+    /* linkat w/ AT_EMPTY_PATH called on a socket not opened w/ O_PATH. */
     return fhandler_socket::link (newpath);
+  /* link on a socket file or linkat w/ AT_EMPTY_PATH called on a
+     socket opened w/ O_PATH. */
   fhandler_disk_file fh (pc);
+  if (get_flags () & O_PATH)
+    fh.set_handle (get_handle ());
   return fh.link (newpath);
 }
 

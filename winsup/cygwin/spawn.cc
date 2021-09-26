@@ -187,9 +187,9 @@ handle (int fd, bool writing)
   else if (cfd->close_on_exec ())
     h = INVALID_HANDLE_VALUE;
   else if (!writing)
-    h = cfd->get_handle ();
+    h = cfd->get_handle_nat ();
   else
-    h = cfd->get_output_handle ();
+    h = cfd->get_output_handle_nat ();
 
   return h;
 }
@@ -607,6 +607,8 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 
       fhandler_pty_slave *ptys_primary = NULL;
       fhandler_console *cons_native = NULL;
+      termios *cons_ti = NULL;
+      pid_t cons_owner = 0;
       for (int i = 0; i < 3; i ++)
 	{
 	  const int chk_order[] = {1, 0, 2};
@@ -621,16 +623,20 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  else if (fh && fh->get_major () == DEV_CONS_MAJOR)
 	    {
 	      fhandler_console *cons = (fhandler_console *) fh;
-	      if (wincap.has_con_24bit_colors () && !iscygwin ())
+	      if (!iscygwin ())
 		{
 		  if (cons_native == NULL)
-		    cons_native = cons;
+		    {
+		      cons_native = cons;
+		      cons_ti = &((tty *)cons->tc ())->ti;
+		      cons_owner = cons->get_owner ();
+		    }
 		  if (fd == 0)
-		    fhandler_console::request_xterm_mode_input (false,
-						cons->get_handle_set ());
+		    fhandler_console::set_input_mode (tty::native,
+					   cons_ti, cons->get_handle_set ());
 		  else if (fd == 1 || fd == 2)
-		    fhandler_console::request_xterm_mode_output (false,
-						 cons->get_handle_set ());
+		    fhandler_console::set_output_mode (tty::native,
+					   cons_ti, cons->get_handle_set ());
 		}
 	    }
 	}
@@ -651,40 +657,64 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 		ptys->create_invisible_console ();
 		ptys->setup_locale ();
 	      }
+	    else if (cfd->get_dev () == FH_PIPEW)
+	      {
+		fhandler_pipe *pipe = (fhandler_pipe *)(fhandler_base *) cfd;
+		pipe->close_query_handle ();
+		pipe->set_pipe_non_blocking (false);
+	      }
+	    else if (cfd->get_dev () == FH_PIPER)
+	      {
+		fhandler_pipe *pipe = (fhandler_pipe *)(fhandler_base *) cfd;
+		pipe->set_pipe_non_blocking (false);
+	      }
 	}
 
       bool enable_pcon = false;
-      HANDLE ptys_from_master = NULL;
+      HANDLE ptys_from_master_nat = NULL;
       HANDLE ptys_input_available_event = NULL;
-      HANDLE ptys_output_mutex = NULL;
+      HANDLE ptys_pcon_mutex = NULL;
+      HANDLE ptys_input_mutex = NULL;
       tty *ptys_ttyp = NULL;
-      _minor_t ptys_unit = 0;
+      bool stdin_is_ptys = false;
       if (!iscygwin () && ptys_primary && is_console_app (runpath))
 	{
 	  bool nopcon = mode != _P_OVERLAY && mode != _P_WAIT;
 	  if (disable_pcon || !ptys_primary->term_has_pcon_cap (envblock))
 	    nopcon = true;
+	  ptys_ttyp = ptys_primary->get_ttyp ();
+	  WaitForSingleObject (ptys_primary->pcon_mutex, INFINITE);
 	  if (ptys_primary->setup_pseudoconsole (nopcon))
 	    enable_pcon = true;
-	  ptys_ttyp = ptys_primary->get_ttyp ();
-	  ptys_unit = ptys_primary->get_minor ();
-	  ptys_from_master = ptys_primary->get_handle ();
-	  DuplicateHandle (GetCurrentProcess (), ptys_from_master,
-			   GetCurrentProcess (), &ptys_from_master,
+	  ReleaseMutex (ptys_primary->pcon_mutex);
+	  HANDLE h_stdin = handle ((in__stdin < 0 ? 0 : in__stdin), false);
+	  if (h_stdin == ptys_primary->get_handle_nat ())
+	    stdin_is_ptys = true;
+	  ptys_from_master_nat = ptys_primary->get_handle_nat ();
+	  DuplicateHandle (GetCurrentProcess (), ptys_from_master_nat,
+			   GetCurrentProcess (), &ptys_from_master_nat,
 			   0, 0, DUPLICATE_SAME_ACCESS);
 	  ptys_input_available_event =
 	    ptys_primary->get_input_available_event ();
 	  DuplicateHandle (GetCurrentProcess (), ptys_input_available_event,
 			   GetCurrentProcess (), &ptys_input_available_event,
 			   0, 0, DUPLICATE_SAME_ACCESS);
-	  DuplicateHandle (GetCurrentProcess (), ptys_primary->output_mutex,
-			   GetCurrentProcess (), &ptys_output_mutex,
+	  DuplicateHandle (GetCurrentProcess (), ptys_primary->pcon_mutex,
+			   GetCurrentProcess (), &ptys_pcon_mutex,
 			   0, 0, DUPLICATE_SAME_ACCESS);
-	  if (!enable_pcon)
-	    fhandler_pty_slave::transfer_input (fhandler_pty_slave::to_nat,
-						ptys_primary->get_handle_cyg (),
-						ptys_ttyp, ptys_unit,
-						ptys_input_available_event);
+	  DuplicateHandle (GetCurrentProcess (), ptys_primary->input_mutex,
+			   GetCurrentProcess (), &ptys_input_mutex,
+			   0, 0, DUPLICATE_SAME_ACCESS);
+	  if (!enable_pcon && ptys_ttyp->getpgid () == myself->pgid
+	      && stdin_is_ptys
+	      && ptys_ttyp->pcon_input_state_eq (tty::to_cyg))
+	    {
+	      WaitForSingleObject (ptys_input_mutex, INFINITE);
+	      fhandler_pty_slave::transfer_input (tty::to_nat,
+				    ptys_primary->get_handle (),
+				    ptys_ttyp, ptys_input_available_event);
+	      ReleaseMutex (ptys_input_mutex);
+	    }
 	}
 
       /* Set up needed handles for stdio */
@@ -969,27 +999,31 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  if (ptys_ttyp)
 	    {
 	      ptys_ttyp->wait_pcon_fwd ();
-	      /* Do not transfer input if another process using pseudo
-		 console exists. */
-	      WaitForSingleObject (ptys_output_mutex, INFINITE);
-	      if (!fhandler_pty_common::get_console_process_id
-			      (myself->exec_dwProcessId, false, true, true))
-		fhandler_pty_slave::transfer_input (fhandler_pty_slave::to_cyg,
-						    ptys_from_master,
-						    ptys_ttyp, ptys_unit,
-						    ptys_input_available_event);
-	      CloseHandle (ptys_from_master);
+	      if (ptys_ttyp->getpgid () == myself->pgid && stdin_is_ptys
+		  && ptys_ttyp->pcon_input_state_eq (tty::to_nat))
+		{
+		  WaitForSingleObject (ptys_input_mutex, INFINITE);
+		  fhandler_pty_slave::transfer_input (tty::to_cyg,
+					    ptys_from_master_nat, ptys_ttyp,
+					    ptys_input_available_event);
+		  ReleaseMutex (ptys_input_mutex);
+		}
+	      CloseHandle (ptys_from_master_nat);
+	      CloseHandle (ptys_input_mutex);
 	      CloseHandle (ptys_input_available_event);
+	      WaitForSingleObject (ptys_pcon_mutex, INFINITE);
 	      fhandler_pty_slave::close_pseudoconsole (ptys_ttyp);
-	      ReleaseMutex (ptys_output_mutex);
-	      CloseHandle (ptys_output_mutex);
+	      ReleaseMutex (ptys_pcon_mutex);
+	      CloseHandle (ptys_pcon_mutex);
 	    }
 	  if (cons_native)
 	    {
-	      fhandler_console::request_xterm_mode_output (true,
-							   &cons_handle_set);
-	      fhandler_console::request_xterm_mode_input (true,
-							  &cons_handle_set);
+	      tty::cons_mode conmode =
+		cons_owner == myself->pid ? tty::restore : tty::cygwin;
+	      fhandler_console::set_output_mode (conmode, cons_ti,
+						 &cons_handle_set);
+	      fhandler_console::set_input_mode (conmode, cons_ti,
+						&cons_handle_set);
 	      fhandler_console::close_handle_set (&cons_handle_set);
 	    }
 	  myself.exit (EXITCODE_NOSET);
@@ -1002,27 +1036,31 @@ child_info_spawn::worker (const char *prog_arg, const char *const *argv,
 	  if (ptys_ttyp)
 	    {
 	      ptys_ttyp->wait_pcon_fwd ();
-	      /* Do not transfer input if another process using pseudo
-		 console exists. */
-	      WaitForSingleObject (ptys_output_mutex, INFINITE);
-	      if (!fhandler_pty_common::get_console_process_id
-			      (myself->exec_dwProcessId, false, true, true))
-		fhandler_pty_slave::transfer_input (fhandler_pty_slave::to_cyg,
-						    ptys_from_master,
-						    ptys_ttyp, ptys_unit,
-						    ptys_input_available_event);
-	      CloseHandle (ptys_from_master);
+	      if (ptys_ttyp->getpgid () == myself->pgid && stdin_is_ptys
+		  && ptys_ttyp->pcon_input_state_eq (tty::to_nat))
+		{
+		  WaitForSingleObject (ptys_input_mutex, INFINITE);
+		  fhandler_pty_slave::transfer_input (tty::to_cyg,
+					    ptys_from_master_nat, ptys_ttyp,
+					    ptys_input_available_event);
+		  ReleaseMutex (ptys_input_mutex);
+		}
+	      CloseHandle (ptys_from_master_nat);
+	      CloseHandle (ptys_input_mutex);
 	      CloseHandle (ptys_input_available_event);
+	      WaitForSingleObject (ptys_pcon_mutex, INFINITE);
 	      fhandler_pty_slave::close_pseudoconsole (ptys_ttyp);
-	      ReleaseMutex (ptys_output_mutex);
-	      CloseHandle (ptys_output_mutex);
+	      ReleaseMutex (ptys_pcon_mutex);
+	      CloseHandle (ptys_pcon_mutex);
 	    }
 	  if (cons_native)
 	    {
-	      fhandler_console::request_xterm_mode_output (true,
-							   &cons_handle_set);
-	      fhandler_console::request_xterm_mode_input (true,
-							  &cons_handle_set);
+	      tty::cons_mode conmode =
+		cons_owner == myself->pid ? tty::restore : tty::cygwin;
+	      fhandler_console::set_output_mode (conmode, cons_ti,
+						 &cons_handle_set);
+	      fhandler_console::set_input_mode (conmode, cons_ti,
+						&cons_handle_set);
 	      fhandler_console::close_handle_set (&cons_handle_set);
 	    }
 	  break;
@@ -1249,6 +1287,13 @@ av::setup (const char *prog_arg, path_conv& real_path, const char *ext,
 			     FILE_SYNCHRONOUS_IO_NONALERT
 			     | FILE_OPEN_FOR_BACKUP_INTENT
 			     | FILE_NON_DIRECTORY_FILE);
+	if (status == STATUS_IO_REPARSE_TAG_NOT_HANDLED)
+	  {
+	    /* This is most likely an app execution alias (such as the
+	       Windows Store version of Python, i.e. not a Cygwin program */
+	    real_path.set_cygexec (false);
+	    break;
+	  }
 	if (!NT_SUCCESS (status))
 	  {
 	    /* File is not readable?  Doesn't mean it's not executable.

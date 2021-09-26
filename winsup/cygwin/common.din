@@ -1092,6 +1092,7 @@ pthread_barrierattr_init SIGFE
 pthread_barrierattr_setpshared SIGFE
 pthread_cancel SIGFE
 pthread_cond_broadcast SIGFE
+pthread_cond_clockwait SIGFE
 pthread_cond_destroy SIGFE
 pthread_cond_init SIGFE
 pthread_cond_signal SIGFE
@@ -1120,6 +1121,7 @@ pthread_join SIGFE
 pthread_key_create SIGFE
 pthread_key_delete SIGFE
 pthread_kill SIGFE
+pthread_mutex_clocklock SIGFE
 pthread_mutex_destroy SIGFE
 pthread_mutex_getprioceiling SIGFE
 pthread_mutex_init SIGFE
@@ -1139,6 +1141,8 @@ pthread_mutexattr_setprotocol SIGFE
 pthread_mutexattr_setpshared SIGFE
 pthread_mutexattr_settype SIGFE
 pthread_once SIGFE
+pthread_rwlock_clockrdlock SIGFE
+pthread_rwlock_clockwrlock SIGFE
 pthread_rwlock_destroy SIGFE
 pthread_rwlock_init SIGFE
 pthread_rwlock_rdlock SIGFE
@@ -1287,6 +1291,7 @@ secure_getenv NOSIGFE
 seed48 NOSIGFE
 seekdir SIGFE
 select = cygwin_select SIGFE
+sem_clockwait SIGFE
 sem_close SIGFE
 sem_destroy SIGFE
 sem_getvalue SIGFE
@@ -1349,6 +1354,7 @@ shmctl SIGFE
 shmdt SIGFE
 shmget SIGFE
 shutdown = cygwin_shutdown SIGFE
+sig2str SIGFE
 sigaction SIGFE
 sigaddset SIGFE
 sigaltstack SIGFE
@@ -1412,6 +1418,7 @@ statvfs SIGFE
 stime SIGFE
 stpcpy NOSIGFE
 stpncpy NOSIGFE
+str2sig SIGFE
 strcasecmp NOSIGFE
 strcasecmp_l NOSIGFE
 strcasestr NOSIGFE

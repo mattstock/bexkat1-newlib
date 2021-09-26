@@ -8,7 +8,7 @@ details. */
 
 #include "winsup.h"
 #include "miscfuncs.h"
-#include "fenv.h"
+#include <fenv.h>
 #define USE_SYS_TYPES_FD_SET
 #include <winsock2.h>
 
@@ -587,6 +587,7 @@ LoadDLLfuncEx (GetLogicalProcessorInformationEx, 12, kernel32, 1)
 LoadDLLfuncEx (GetProcessGroupAffinity, 12, kernel32, 1)
 LoadDLLfunc (GetSystemTimePreciseAsFileTime, 4, kernel32)
 LoadDLLfuncEx (GetThreadGroupAffinity, 8, kernel32, 1)
+LoadDLLfuncEx (IsWow64Process2, 12, kernel32, 1)
 LoadDLLfuncEx (PrefetchVirtualMemory, 16, kernel32, 1)
 LoadDLLfunc (SetThreadGroupAffinity, 12, kernel32)
 
@@ -597,7 +598,7 @@ LoadDLLfunc (QueryInterruptTime, 4, KernelBase)
 LoadDLLfunc (QueryInterruptTimePrecise, 4, KernelBase)
 LoadDLLfunc (QueryUnbiasedInterruptTime, 4, KernelBase)
 LoadDLLfunc (QueryUnbiasedInterruptTimePrecise, 4, KernelBase)
-LoadDLLfunc (VirtualAlloc2, 28, kernelbase)
+LoadDLLfunc (VirtualAlloc2, 28, KernelBase)
 
 LoadDLLfunc (NtMapViewOfSectionEx, 36, ntdll)
 
