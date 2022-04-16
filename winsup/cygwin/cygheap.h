@@ -222,7 +222,7 @@ class fcwd_access_t {
     LONG           FSCharacteristics;	/* Taken from FileFsDeviceInformation */
     WCHAR          Buffer[MAX_PATH] __attribute ((aligned (8)));
   };
-  /* This is the layout used in Windows 7 and Vista. */
+  /* This is the layout used in Windows 7. */
   struct FAST_CWD_7 {
     UNICODE_STRING Path;		/* Path's Buffer member always refers
 					   to the following Buffer array. */
@@ -565,6 +565,7 @@ struct init_cygheap: public mini_cygheap
   cygheap_user user;
   user_heap_info user_heap;
   mode_t umask;
+  LONG rlim_as_id;
   unsigned long rlim_core;
   HANDLE console_h;
   cwdstuff cwd;
@@ -589,6 +590,7 @@ struct init_cygheap: public mini_cygheap
   HANDLE __reg3 remove_tls (_cygtls *);
   threadlist_t __reg2 *find_tls (_cygtls *);
   threadlist_t __reg3 *find_tls (int, bool&);
+  sigset_t compute_sigblkmask ();
   void unlock_tls (threadlist_t *t) { if (t) ReleaseMutex (t->mutex); }
 };
 

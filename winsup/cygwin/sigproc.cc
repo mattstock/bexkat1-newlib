@@ -594,6 +594,14 @@ sig_send (_pinfo *p, siginfo_t& si, _cygtls *tls)
       p = myself;
     }
 
+  /* If myself is the stub process, send signal to the child process
+     rather than myself. The fact that myself->dwProcessId is not equal
+     to the current process id indicates myself is the stub process. */
+  if (its_me && myself->dwProcessId != GetCurrentProcessId ())
+    {
+      wait_for_completion = false;
+      its_me = false;
+    }
 
   if (its_me)
     sendsig = my_sendsig;
@@ -675,7 +683,7 @@ sig_send (_pinfo *p, siginfo_t& si, _cygtls *tls)
   sigset_t pending;
   if (!its_me)
     pack.mask = NULL;
-  else if (si.si_signo == __SIGPENDING)
+  else if (si.si_signo == __SIGPENDING || si.si_signo == __SIGPENDINGALL)
     pack.mask = &pending;
   else if (si.si_signo == __SIGFLUSH || si.si_signo > 0)
     {
@@ -793,7 +801,7 @@ out:
     }
   if (pack.wakeup)
     ForceCloseHandle (pack.wakeup);
-  if (si.si_signo != __SIGPENDING)
+  if (si.si_signo != __SIGPENDING && si.si_signo != __SIGPENDINGALL)
     /* nothing */;
   else if (!rc)
     rc = pending;
@@ -809,31 +817,11 @@ int child_info::retry_count = 0;
    by fork/spawn/exec. */
 child_info::child_info (unsigned in_cb, child_info_types chtype,
 			bool need_subproc_ready):
-  cb (in_cb), intro (PROC_MAGIC_GENERIC), magic (CHILD_INFO_MAGIC),
-  type (chtype), cygheap (::cygheap), cygheap_max (::cygheap_max),
-  flag (0), retry (child_info::retry_count), rd_proc_pipe (NULL),
-  wr_proc_pipe (NULL)
+  msv_count (0), cb (in_cb), intro (PROC_MAGIC_GENERIC),
+  magic (CHILD_INFO_MAGIC), type (chtype), cygheap (::cygheap),
+  cygheap_max (::cygheap_max), flag (0), retry (child_info::retry_count),
+  rd_proc_pipe (NULL), wr_proc_pipe (NULL)
 {
-  /* It appears that when running under WOW64 on Vista 64, the first DWORD
-     value in the datastructure lpReserved2 is pointing to (msv_count in
-     Cygwin), has to reflect the size of that datastructure as used in the
-     Microsoft C runtime (a count value, counting the number of elements in
-     two subsequent arrays, BYTE[count and HANDLE[count]), even though the C
-     runtime isn't used.  Otherwise, if msv_count is 0 or too small, the
-     datastructure gets overwritten.
-
-     This seems to be a bug in Vista's WOW64, which apparently copies the
-     lpReserved2 datastructure not using the cbReserved2 size information,
-     but using the information given in the first DWORD within lpReserved2
-     instead.  However, it's not clear if a non-0 count doesn't result in
-     trying to evaluate the content, so we do this really only for Vista 64.
-
-     The value is sizeof (child_info_*) / 5 which results in a count which
-     covers the full datastructure, plus not more than 4 extra bytes.  This
-     is ok as long as the child_info structure is cosily stored within a bigger
-     datastructure. */
-  msv_count = wincap.needs_count_in_si_lpres2 () ? in_cb / 5 : 0;
-
   fhandler_union_cb = sizeof (fhandler_union);
   user_h = cygwin_user_h;
   if (strace.active ())
@@ -1359,7 +1347,7 @@ wait_sig (VOID *)
       sigq.retry = false;
       /* Don't process signals when we start exiting */
       if (exit_state > ES_EXIT_STARTING && pack.si.si_signo > 0)
-	continue;
+	goto skip_process_signal;
 
       sigset_t dummy_mask;
       threadlist_t *tl_entry;
@@ -1371,8 +1359,10 @@ wait_sig (VOID *)
 	  pack.mask = &dummy_mask;
 	}
 
-      sigpacket *q = &sigq.start;
-      bool clearwait = false;
+      sigpacket *q;
+      q = &sigq.start;
+      bool clearwait;
+      clearwait = false;
       switch (pack.si.si_signo)
 	{
 	case __SIGCOMMUNE:
@@ -1380,6 +1370,26 @@ wait_sig (VOID *)
 	  break;
 	case __SIGSTRACE:
 	  strace.activate (false);
+	  break;
+	case __SIGPENDINGALL:
+	  {
+	    unsigned bit;
+	    bool issig_wait;
+
+	    *pack.mask = 0;
+	    while ((q = q->next))
+	      {
+		if (q->sigtls->sigmask & (bit = SIGTOMASK (q->si.si_signo)))
+		  {
+		    tl_entry = cygheap->find_tls (q->si.si_signo, issig_wait);
+		    if (tl_entry)
+		      {
+			*pack.mask |= bit;
+			cygheap->unlock_tls (tl_entry);
+		      }
+		  }
+	      }
+	  }
 	  break;
 	case __SIGPENDING:
 	  {
@@ -1402,7 +1412,8 @@ wait_sig (VOID *)
 	  sig_held = true;
 	  break;
 	case __SIGSETPGRP:
-	  init_console_handler (true);
+	  init_console_handler (::cygheap->ctty
+				&& ::cygheap->ctty->is_console ());
 	  break;
 	case __SIGTHREADEXIT:
 	  {
@@ -1466,9 +1477,20 @@ wait_sig (VOID *)
 		clearwait = true;
 	    }
 	  break;
+	case __SIGNONCYGCHLD:
+	  cygheap_fdenum cfd (false);
+	  while (cfd.next () >= 0)
+	    if (cfd->get_dev () == FH_PIPEW)
+	      {
+		fhandler_pipe *pipe = (fhandler_pipe *)(fhandler_base *) cfd;
+		if (pipe->need_close_query_hdl ())
+		  pipe->close_query_handle ();
+	      }
+	  break;
 	}
       if (clearwait && !have_execed)
 	proc_subproc (PROC_CLEARWAIT, 0);
+skip_process_signal:
       if (pack.wakeup)
 	{
 	  sigproc_printf ("signalling pack.wakeup %p", pack.wakeup);

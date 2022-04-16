@@ -44,7 +44,7 @@ AC_ARG_WITH([cross-bootstrap],[AS_HELP_STRING([--with-cross-bootstrap],[do not b
 
 AC_CYGWIN_INCLUDES
 
-AC_CONFIG_HEADER(cygwin/config.h)
+AC_CONFIG_HEADERS([cygwin/config.h])
 
 AC_CHECK_TOOL(AR, ar, ar)
 AC_CHECK_TOOL(AS, as, as)
@@ -58,7 +58,7 @@ AC_CHECK_TOOL(STRIP, strip, strip)
 AC_CHECK_TOOL(WINDRES, windres, windres)
 
 AC_ARG_ENABLE(debugging,
-[ --enable-debugging		Build a cygwin DLL which has more consistency checking for debugging],
+[AS_HELP_STRING([--enable-debugging],[Build a cygwin DLL which has more consistency checking for debugging])],
 [case "${enableval}" in
 yes)	 AC_DEFINE([DEBUGGING],[1],[Define if DEBUGGING support is requested.]) ;;
 no)	 ;;
@@ -88,7 +88,30 @@ AC_SUBST(TLSOFFSETS_H)
 
 AM_CONDITIONAL(TARGET_X86_64, [test $target_cpu = "x86_64"])
 
-AC_CHECK_PROGS([DOCBOOK2XTEXI], [docbook2x-texi db2x_docbook2texi], [true])
+AC_ARG_ENABLE(doc,
+	      [AS_HELP_STRING([--disable-doc], [do not build documentation])],,
+	      enable_doc=yes)
+AM_CONDITIONAL(BUILD_DOC, [test $enable_doc != "no"])
+
+AC_CHECK_PROGS([DOCBOOK2XTEXI], [docbook2x-texi db2x_docbook2texi])
+if test -z "$DOCBOOK2XTEXI" ; then
+    if test "x$enable_doc" != "xno"; then
+        AC_MSG_ERROR([docbook2texi is required to build documentation])
+    else
+        unset DOCBOOK2XTEXI
+        AM_MISSING_PROG([DOCBOOK2XTEXI], [docbook2texi])
+    fi
+fi
+
+AC_CHECK_PROGS([XMLTO], [xmlto])
+if test -z "$XMLTO"; then
+    if test "x$enable_doc" != "xno"; then
+        AC_MSG_ERROR([xmlto is required to build documentation])
+    else
+        unset XMLTO
+        AM_MISSING_PROG([XMLTO], [xmlto])
+    fi
+fi
 
 if test "x$with_cross_bootstrap" != "xyes"; then
     AC_CHECK_PROGS(MINGW_CXX, ${target_cpu}-w64-mingw32-g++)

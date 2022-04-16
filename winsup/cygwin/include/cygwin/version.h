@@ -10,7 +10,7 @@ details. */
    the Cygwin shared library".  This version is used to track important
    changes to the DLL and is mainly informative in nature. */
 
-#define CYGWIN_VERSION_DLL_MAJOR 3003
+#define CYGWIN_VERSION_DLL_MAJOR 3004
 #define CYGWIN_VERSION_DLL_MINOR 0
 
 /* Major numbers before CYGWIN_VERSION_DLL_EPOCH are incompatible. */
@@ -514,7 +514,8 @@ details. */
   340: Export dbm_clearerr, dbm_close, dbm_delete, dbm_dirfno, dbm_error,
        dbm_fetch, dbm_firstkey, dbm_nextkey, dbm_open, dbm_store.
   341: Export pthread_cond_clockwait, pthread_mutex_clocklock,
-       pthread_rwlock_clockrdlock, pthread_rwlock_clockwrlock, sem_clockwait.
+       pthread_rwlock_clockrdlock, pthread_rwlock_clockwrlock,
+       sem_clockwait, sig2str, str2sig.
 
   Note that we forgot to bump the api for ualarm, strtoll, strtoull,
   sigaltstack, sethostname. */

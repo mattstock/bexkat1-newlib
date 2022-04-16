@@ -410,6 +410,9 @@ dtable::init_std_file_from_handle (int fd, HANDLE handle)
 	{
 	  fhandler_pipe *fhp = (fhandler_pipe *) fh;
 	  fhp->set_pipe_buf_size ();
+	  /* Set read pipe always to nonblocking */
+	  fhp->set_pipe_non_blocking (fhp->get_device () == FH_PIPER ?
+				      true : fhp->is_nonblocking ());
 	}
 
       if (!fh->open_setup (openflags))
@@ -419,6 +422,7 @@ dtable::init_std_file_from_handle (int fd, HANDLE handle)
       cygheap->fdtab[fd]->inc_refcnt ();
       set_std_handle (fd);
       paranoid_printf ("fd %d, handle %p", fd, handle);
+      fh->post_open_setup (fd);
     }
 }
 
@@ -577,6 +581,9 @@ fh_alloc (path_conv& pc)
 	  break;
 	case FH_DEV:
 	  fh = cnew (fhandler_dev);
+	  break;
+	case FH_DEV_FD:
+	  fh = cnew (fhandler_dev_fd);
 	  break;
 	case FH_CYGDRIVE:
 	  fh = cnew (fhandler_cygdrive);

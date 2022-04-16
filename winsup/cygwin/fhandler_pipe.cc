@@ -6,8 +6,6 @@ This software is a copyrighted work licensed under the terms of the
 Cygwin license.  Please consult the file "CYGWIN_LICENSE" for
 details. */
 
-/* FIXME: Should this really be fhandler_pipe.cc? */
-
 #include "winsup.h"
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -20,7 +18,7 @@ details. */
 #include "pinfo.h"
 #include "shared_info.h"
 #include "tls_pbuf.h"
-#include <psapi.h>
+#include <assert.h>
 
 /* This is only to be used for writing.  When reading,
 STATUS_PIPE_EMPTY simply means there's no data to be read. */
@@ -91,7 +89,10 @@ fhandler_pipe::init (HANDLE f, DWORD a, mode_t mode, int64_t uniq_id)
   set_ino (uniq_id);
   set_unique_id (uniq_id | !!(mode & GENERIC_WRITE));
   if (opened_properly)
-    set_pipe_non_blocking (is_nonblocking ());
+    /* Set read pipe always nonblocking to allow signal handling
+       even with FILE_SYNCHRONOUS_IO_NONALERT. */
+    set_pipe_non_blocking (get_device () == FH_PIPER ?
+			   true : is_nonblocking ());
   return 1;
 }
 
@@ -265,9 +266,9 @@ fhandler_pipe::release_select_sem (const char *from)
   if (get_dev () == FH_PIPER) /* Number of select() and writer */
     n_release = get_obj_handle_count (select_sem)
       - get_obj_handle_count (read_mtx);
-  else /* Number of select() call */
+  else /* Number of select() call and reader */
     n_release = get_obj_handle_count (select_sem)
-      - get_obj_handle_count (hdl_cnt_mtx);
+      - get_obj_handle_count (get_handle ());
   debug_printf("%s(%s) release %d", from,
 	       get_dev () == FH_PIPER ? "PIPER" : "PIPEW", n_release);
   if (n_release)
@@ -280,18 +281,9 @@ fhandler_pipe::raw_read (void *ptr, size_t& len)
   size_t nbytes = 0;
   NTSTATUS status = STATUS_SUCCESS;
   IO_STATUS_BLOCK io;
-  HANDLE evt = NULL;
 
   if (!len)
     return;
-
-  /* Create a wait event if we're in blocking mode. */
-  if (!is_nonblocking () && !(evt = CreateEvent (NULL, false, false, NULL)))
-    {
-      __seterrno ();
-      len = (size_t) -1;
-      return;
-    }
 
   DWORD timeout = is_nonblocking () ? 0 : INFINITE;
   DWORD waitret = cygwait (read_mtx, timeout);
@@ -303,8 +295,16 @@ fhandler_pipe::raw_read (void *ptr, size_t& len)
       set_errno (EAGAIN);
       len = (size_t) -1;
       return;
-    default:
+    case WAIT_SIGNALED:
       set_errno (EINTR);
+      len = (size_t) -1;
+      return;
+    case WAIT_CANCELED:
+      pthread::static_cancel_self ();
+      /* NOTREACHED */
+    default:
+      /* Should not reach here. */
+      __seterrno ();
       len = (size_t) -1;
       return;
     }
@@ -312,54 +312,26 @@ fhandler_pipe::raw_read (void *ptr, size_t& len)
     {
       ULONG_PTR nbytes_now = 0;
       ULONG len1 = (ULONG) (len - nbytes);
-      waitret = WAIT_OBJECT_0;
 
-      if (evt)
-	ResetEvent (evt);
       FILE_PIPE_LOCAL_INFORMATION fpli;
       status = NtQueryInformationFile (get_handle (), &io,
 				       &fpli, sizeof (fpli),
 				       FilePipeLocalInformation);
       if (NT_SUCCESS (status))
 	{
-	if (fpli.ReadDataAvailable == 0 && nbytes != 0)
-	  break;
+	  if (fpli.ReadDataAvailable == 0 && nbytes != 0)
+	    break;
 	}
       else if (nbytes != 0)
 	break;
-      status = NtReadFile (get_handle (), evt, NULL, NULL, &io, ptr,
+      status = NtReadFile (get_handle (), NULL, NULL, NULL, &io, ptr,
 			   len1, NULL, NULL);
-      if (evt && status == STATUS_PENDING)
-	{
-	  waitret = cygwait (evt, INFINITE, cw_cancel | cw_sig);
-	  /* If io.Status is STATUS_CANCELLED after CancelIo, IO has actually
-	     been cancelled and io.Information contains the number of bytes
-	     processed so far.
-	     Otherwise IO has been finished regulary and io.Status contains
-	     valid success or error information. */
-	  CancelIo (get_handle ());
-	  if (waitret == WAIT_SIGNALED && io.Status != STATUS_CANCELLED)
-	    waitret = WAIT_OBJECT_0;
-
-	  if (waitret == WAIT_CANCELED)
-	    status = STATUS_THREAD_CANCELED;
-	  else if (waitret == WAIT_SIGNALED)
-	    status = STATUS_THREAD_SIGNALED;
-	  else
-	    status = io.Status;
-	}
       if (isclosed ())  /* A signal handler might have closed the fd. */
 	{
-	  if (waitret == WAIT_OBJECT_0)
-	    set_errno (EBADF);
-	  else
-	    __seterrno ();
+	  set_errno (EBADF);
 	  nbytes = (size_t) -1;
 	}
-      else if (NT_SUCCESS (status)
-	       || status == STATUS_BUFFER_OVERFLOW
-	       || status == STATUS_THREAD_CANCELED
-	       || status == STATUS_THREAD_SIGNALED)
+      else if (NT_SUCCESS (status) || status == STATUS_BUFFER_OVERFLOW)
 	{
 	  nbytes_now = io.Information;
 	  ptr = ((char *) ptr) + nbytes_now;
@@ -386,7 +358,16 @@ fhandler_pipe::raw_read (void *ptr, size_t& len)
 		  nbytes = (size_t) -1;
 		  break;
 		}
-	      fallthrough;
+	      waitret = cygwait (select_sem, 1);
+	      if (waitret == WAIT_CANCELED)
+		pthread::static_cancel_self ();
+	      else if (waitret == WAIT_SIGNALED)
+		{
+		  set_errno (EINTR);
+		  nbytes = (size_t) -1;
+		  break;
+		}
+	      continue;
 	    default:
 	      __seterrno_from_nt_status (status);
 	      nbytes = (size_t) -1;
@@ -394,19 +375,11 @@ fhandler_pipe::raw_read (void *ptr, size_t& len)
 	    }
 	}
 
-      if (nbytes_now == 0 || status == STATUS_BUFFER_OVERFLOW)
+      if ((nbytes_now == 0 && !NT_SUCCESS (status))
+	  || status == STATUS_BUFFER_OVERFLOW)
 	break;
     }
   ReleaseMutex (read_mtx);
-  if (evt)
-    CloseHandle (evt);
-  if (status == STATUS_THREAD_SIGNALED && nbytes == 0)
-    {
-      set_errno (EINTR);
-      nbytes = (size_t) -1;
-    }
-  else if (status == STATUS_THREAD_CANCELED)
-    pthread::static_cancel_self ();
   len = nbytes;
 }
 
@@ -429,7 +402,7 @@ fhandler_pipe_fifo::raw_write (const void *ptr, size_t len)
   ULONG chunk;
   NTSTATUS status = STATUS_SUCCESS;
   IO_STATUS_BLOCK io;
-  HANDLE evt = NULL;
+  HANDLE evt;
 
   if (!len)
     return 0;
@@ -441,15 +414,14 @@ fhandler_pipe_fifo::raw_write (const void *ptr, size_t len)
       return -1;
     }
 
-  if (len <= pipe_buf_size)
+  if (len <= pipe_buf_size || pipe_buf_size == 0)
     chunk = len;
   else if (is_nonblocking ())
     chunk = len = pipe_buf_size;
   else
     chunk = pipe_buf_size;
 
-  /* Create a wait event if the pipe or fifo is in blocking mode. */
-  if (!is_nonblocking () && !(evt = CreateEvent (NULL, false, false, NULL)))
+  if (!(evt = CreateEvent (NULL, false, false, NULL)))
     {
       __seterrno ();
       return -1;
@@ -494,41 +466,41 @@ fhandler_pipe_fifo::raw_write (const void *ptr, size_t len)
 	{
 	  status = NtWriteFile (get_handle (), evt, NULL, NULL, &io,
 				(PVOID) ptr, len1, NULL, NULL);
-	  if (evt || !NT_SUCCESS (status) || io.Information > 0
+	  if (status == STATUS_PENDING)
+	    {
+	      while (WAIT_TIMEOUT ==
+		     (waitret = cygwait (evt, (DWORD) 0, cw_cancel | cw_sig)))
+		{
+		  if (reader_closed ())
+		    {
+		      CancelIo (get_handle ());
+		      set_errno (EPIPE);
+		      raise (SIGPIPE);
+		      goto out;
+		    }
+		  else
+		    cygwait (select_sem, 10);
+		}
+	      /* If io.Status is STATUS_CANCELLED after CancelIo, IO has
+		 actually been cancelled and io.Information contains the
+		 number of bytes processed so far.
+		 Otherwise IO has been finished regulary and io.Status
+		 contains valid success or error information. */
+	      CancelIo (get_handle ());
+	      if (waitret == WAIT_SIGNALED && io.Status != STATUS_CANCELLED)
+		waitret = WAIT_OBJECT_0;
+
+	      if (waitret == WAIT_CANCELED)
+		status = STATUS_THREAD_CANCELED;
+	      else if (waitret == WAIT_SIGNALED)
+		status = STATUS_THREAD_SIGNALED;
+	      else
+		status = io.Status;
+	    }
+	  if (!is_nonblocking () || !NT_SUCCESS (status) || io.Information > 0
 	      || len <= PIPE_BUF)
 	    break;
 	  len1 >>= 1;
-	}
-      if (evt && status == STATUS_PENDING)
-	{
-	  while (WAIT_TIMEOUT ==
-		 (waitret = cygwait (evt, (DWORD) 0, cw_cancel | cw_sig)))
-	    {
-	      if (reader_closed ())
-		{
-		  CancelIo (get_handle ());
-		  set_errno (EPIPE);
-		  raise (SIGPIPE);
-		  goto out;
-		}
-	      else
-		cygwait (select_sem, 10);
-	    }
-	  /* If io.Status is STATUS_CANCELLED after CancelIo, IO has actually
-	     been cancelled and io.Information contains the number of bytes
-	     processed so far.
-	     Otherwise IO has been finished regulary and io.Status contains
-	     valid success or error information. */
-	  CancelIo (get_handle ());
-	  if (waitret == WAIT_SIGNALED && io.Status != STATUS_CANCELLED)
-	    waitret = WAIT_OBJECT_0;
-
-	  if (waitret == WAIT_CANCELED)
-	    status = STATUS_THREAD_CANCELED;
-	  else if (waitret == WAIT_SIGNALED)
-	    status = STATUS_THREAD_SIGNALED;
-	  else
-	    status = io.Status;
 	}
       if (isclosed ())  /* A signal handler might have closed the fd. */
 	{
@@ -562,8 +534,7 @@ fhandler_pipe_fifo::raw_write (const void *ptr, size_t len)
 	break;
     }
 out:
-  if (evt)
-    CloseHandle (evt);
+  CloseHandle (evt);
   if (status == STATUS_THREAD_SIGNALED && nbytes == 0)
     set_errno (EINTR);
   else if (status == STATUS_THREAD_CANCELED)
@@ -595,6 +566,8 @@ fhandler_pipe::fixup_after_fork (HANDLE parent)
     fork_fixup (parent, select_sem, "select_sem");
   if (query_hdl)
     fork_fixup (parent, query_hdl, "query_hdl");
+  if (query_hdl_close_req_evt)
+    fork_fixup (parent, query_hdl_close_req_evt, "query_hdl_close_req_evt");
 
   fhandler_base::fixup_after_fork (parent);
   ReleaseMutex (hdl_cnt_mtx);
@@ -645,6 +618,16 @@ fhandler_pipe::dup (fhandler_base *child, int flags)
       ftp->close ();
       res = -1;
     }
+  else if (query_hdl_close_req_evt &&
+	   !DuplicateHandle (GetCurrentProcess (), query_hdl_close_req_evt,
+			     GetCurrentProcess (),
+			     &ftp->query_hdl_close_req_evt,
+			     0, !(flags & O_CLOEXEC), DUPLICATE_SAME_ACCESS))
+    {
+      __seterrno ();
+      ftp->close ();
+      res = -1;
+    }
   ReleaseMutex (hdl_cnt_mtx);
 
   debug_printf ("res %d", res);
@@ -664,6 +647,8 @@ fhandler_pipe::close ()
   WaitForSingleObject (hdl_cnt_mtx, INFINITE);
   if (query_hdl)
     CloseHandle (query_hdl);
+  if (query_hdl_close_req_evt)
+    CloseHandle (query_hdl_close_req_evt);
   int ret = fhandler_base::close ();
   ReleaseMutex (hdl_cnt_mtx);
   CloseHandle (hdl_cnt_mtx);
@@ -897,9 +882,18 @@ fhandler_pipe::create (fhandler_pipe *fhs[2], unsigned psize, int mode)
 			0, sa->bInheritHandle, DUPLICATE_SAME_ACCESS))
     goto err_close_hdl_cnt_mtx0;
 
+  if (fhs[1]->query_hdl)
+    {
+      fhs[1]->query_hdl_close_req_evt = CreateEvent (sa, TRUE, FALSE, NULL);
+      if (!fhs[1]->query_hdl_close_req_evt)
+	goto err_close_hdl_cnt_mtx1;
+    }
+
   res = 0;
   goto out;
 
+err_close_hdl_cnt_mtx1:
+  CloseHandle (fhs[1]->hdl_cnt_mtx);
 err_close_hdl_cnt_mtx0:
   CloseHandle (fhs[0]->hdl_cnt_mtx);
 err_close_query_hdl:
@@ -985,9 +979,12 @@ nt_create (LPSECURITY_ATTRIBUTES sa_ptr, HANDLE &r, HANDLE &w,
 				  npfsh, sa_ptr->lpSecurityDescriptor);
 
       timeout.QuadPart = -500000;
+      /* Set FILE_SYNCHRONOUS_IO_NONALERT flag so that native
+	 C# programs work with cygwin pipe. */
       status = NtCreateNamedPipeFile (&r, access, &attr, &io,
 				      FILE_SHARE_READ | FILE_SHARE_WRITE,
-				      FILE_CREATE, 0, pipe_type,
+				      FILE_CREATE,
+				      FILE_SYNCHRONOUS_IO_NONALERT, pipe_type,
 				      FILE_PIPE_BYTE_STREAM_MODE,
 				      0, 1, psize, psize, &timeout);
 
@@ -1099,7 +1096,9 @@ fhandler_pipe::fcntl (int cmd, intptr_t arg)
   const bool was_nonblocking = is_nonblocking ();
   int res = fhandler_base::fcntl (cmd, arg);
   const bool now_nonblocking = is_nonblocking ();
-  if (now_nonblocking != was_nonblocking)
+  /* Do not set blocking mode for read pipe to allow signal handling
+     even with FILE_SYNCHRONOUS_IO_NONALERT. */
+  if (now_nonblocking != was_nonblocking && get_device () != FH_PIPER)
     set_pipe_non_blocking (now_nonblocking);
   return res;
 }
@@ -1180,7 +1179,7 @@ cache_err:
   if (wincap.has_query_process_handle_info ())
     return get_query_hdl_per_process (name, ntfn); /* Since Win8 */
   else
-    return get_query_hdl_per_system (name, ntfn); /* Vista or Win7 */
+    return get_query_hdl_per_system (name, ntfn); /* Win7 */
 }
 
 /* This function is faster than get_query_hdl_per_system(), however,
@@ -1190,27 +1189,47 @@ HANDLE
 fhandler_pipe::get_query_hdl_per_process (WCHAR *name,
 					  OBJECT_NAME_INFORMATION *ntfn)
 {
+  NTSTATUS status;
   ULONG len;
-  BOOL res;
   DWORD n_process = 256;
-  DWORD *proc_pids;
+  PSYSTEM_PROCESS_INFORMATION spi;
   do
     { /* Enumerate processes */
-      DWORD nbytes = n_process * sizeof (DWORD);
-      proc_pids = (DWORD *) HeapAlloc (GetProcessHeap (), 0, nbytes);
-      if (!proc_pids)
+      DWORD nbytes = n_process * sizeof (SYSTEM_PROCESS_INFORMATION);
+      spi = (PSYSTEM_PROCESS_INFORMATION) HeapAlloc (GetProcessHeap (),
+						     0, nbytes);
+      if (!spi)
 	return NULL;
-      res = EnumProcesses (proc_pids, nbytes, &len);
-      if (res && len < nbytes)
+      status = NtQuerySystemInformation (SystemProcessInformation,
+					 spi, nbytes, &len);
+      if (NT_SUCCESS (status))
 	break;
-      res = FALSE;
-      HeapFree (GetProcessHeap (), 0, proc_pids);
+      HeapFree (GetProcessHeap (), 0, spi);
       n_process *= 2;
     }
-  while (n_process < (1L<<20));
-  if (!res)
+  while (n_process < (1L<<20) && status == STATUS_INFO_LENGTH_MISMATCH);
+  if (!NT_SUCCESS (status))
     return NULL;
-  n_process = len / sizeof (DWORD);
+
+  /* In most cases, it is faster to check the processes in reverse order.
+     To do this, store PIDs into an array. */
+  DWORD *proc_pids = (DWORD *) HeapAlloc (GetProcessHeap (), 0,
+					  n_process * sizeof (DWORD));
+  if (!proc_pids)
+    {
+      HeapFree (GetProcessHeap (), 0, spi);
+      return NULL;
+    }
+  PSYSTEM_PROCESS_INFORMATION p = spi;
+  n_process = 0;
+  while (true)
+    {
+      proc_pids[n_process++] = (DWORD)(intptr_t) p->UniqueProcessId;
+      if (!p->NextEntryOffset)
+	break;
+      p = (PSYSTEM_PROCESS_INFORMATION) ((char *) p + p->NextEntryOffset);
+    }
+  HeapFree (GetProcessHeap (), 0, spi);
 
   for (LONG i = (LONG) n_process - 1; i >= 0; i--)
     {
@@ -1221,7 +1240,6 @@ fhandler_pipe::get_query_hdl_per_process (WCHAR *name,
 	continue;
 
       /* Retrieve process handles */
-      NTSTATUS status;
       DWORD n_handle = 256;
       PPROCESS_HANDLE_SNAPSHOT_INFORMATION phi;
       do
@@ -1232,6 +1250,12 @@ fhandler_pipe::get_query_hdl_per_process (WCHAR *name,
 	    HeapAlloc (GetProcessHeap (), 0, nbytes);
 	  if (!phi)
 	    goto close_proc;
+	  /* NtQueryInformationProcess can return STATUS_SUCCESS with
+	     invalid handle data for certain processes.  See
+	     https://github.com/processhacker/processhacker/blob/05f5e9fa477dcaa1709d9518170d18e1b3b8330d/phlib/native.c#L5754.
+	     We need to ensure that NumberOfHandles is zero in this
+	     case to avoid a crash in the for loop below. */
+	  phi->NumberOfHandles = 0;
 	  status = NtQueryInformationProcess (proc, ProcessHandleInformation,
 					      phi, nbytes, &len);
 	  if (NT_SUCCESS (status))
@@ -1243,6 +1267,10 @@ fhandler_pipe::get_query_hdl_per_process (WCHAR *name,
       if (!NT_SUCCESS (status))
 	goto close_proc;
 
+      /* Sanity check in case Microsoft changes
+	 NtQueryInformationProcess and the initialization of
+	 NumberOfHandles above is no longer sufficient. */
+      assert (phi->NumberOfHandles <= n_handle);
       for (ULONG j = 0; j < phi->NumberOfHandles; j++)
 	{
 	  /* Check for the peculiarity of cygwin read pipe */
@@ -1255,8 +1283,8 @@ fhandler_pipe::get_query_hdl_per_process (WCHAR *name,
 
 	  /* Retrieve handle */
 	  HANDLE h = (HANDLE)(intptr_t) phi->Handles[j].HandleValue;
-	  res = DuplicateHandle (proc, h, GetCurrentProcess (), &h,
-				 FILE_READ_DATA, 0, 0);
+	  BOOL res = DuplicateHandle (proc, h, GetCurrentProcess (), &h,
+				      FILE_READ_DATA, 0, 0);
 	  if (!res)
 	    continue;
 

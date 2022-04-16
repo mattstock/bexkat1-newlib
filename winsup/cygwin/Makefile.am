@@ -40,7 +40,9 @@ toolincludedir=$(tooldir)/include
 # Parameters used in building the cygwin.dll.
 
 DLL_NAME=cygwin1.dll
-TEST_DLL_NAME=cygwin0.dll
+PRE_DLL_NAME=cygwin0.dll
+DBG_DLL_NAME=cygwin1.dbg
+NEW_DLL_NAME=new-cygwin1.dll
 DIN_FILE=@DIN_FILE@
 DEF_FILE=cygwin.def
 TLSOFFSETS_H=@TLSOFFSETS_H@
@@ -230,6 +232,7 @@ DLL_FILES= \
 	fhandler_console.cc \
 	fhandler_cygdrive.cc \
 	fhandler_dev.cc \
+	fhandler_dev_fd.cc \
 	fhandler_disk_file.cc \
 	fhandler_dsp.cc \
 	fhandler_fifo.cc \
@@ -367,16 +370,16 @@ libdll_a_SOURCES= \
 #
 
 shared_info_magic.h: cygmagic shared_info.h
-	$(srcdir)/cygmagic $@ "$(CC) $(INCLUDES) $(CPPFLAGS) -E -x c++" $(word 2,$^) SHARED_MAGIC 'class shared_info' USER_MAGIC 'class user_info'
+	$(AM_V_GEN)$(srcdir)/cygmagic $@ "$(CC) $(INCLUDES) $(CPPFLAGS) -E -x c++" $(word 2,$^) SHARED_MAGIC 'class shared_info' USER_MAGIC 'class user_info'
 
 child_info_magic.h: cygmagic child_info.h
-	$(srcdir)/cygmagic $@ "$(CC) $(INCLUDES) $(CPPFLAGS) -E -x c++" $(word 2,$^) CHILD_INFO_MAGIC 'class child_info'
+	$(AM_V_GEN)$(srcdir)/cygmagic $@ "$(CC) $(INCLUDES) $(CPPFLAGS) -E -x c++" $(word 2,$^) CHILD_INFO_MAGIC 'class child_info'
 
 globals.h: mkglobals_h globals.cc
-	$^ > $@
+	$(AM_V_GEN)$^ > $@
 
 localtime.patched.c: tzcode/localtime.c tzcode/localtime.c.patch
-	patch -u -o localtime.patched.c \
+	$(AM_V_GEN)patch -u -o localtime.patched.c \
 		    $(srcdir)/tzcode/localtime.c \
 		    $(srcdir)/tzcode/localtime.c.patch
 
@@ -548,16 +551,6 @@ endif
 
 dtable_CFLAGS=-fcheck-new
 
-# If an optimization level is explicitly set in CXXFLAGS, set -O3 for these files
-# XXX: this seems to assume it's not -O0?
-#
-# (the indentation here prevents automake trying to process this as an automake
-# conditional)
- ifneq "${filter -O%,$(CXXFLAGS)}" ""
-  malloc_CFLAGS=-O3
-  sync_CFLAGS=-O3
- endif
-
 #
 # libraries and installed objects
 #
@@ -630,11 +623,12 @@ $(LIBSERVER):
 # linker script
 LDSCRIPT=cygwin.sc
 $(LDSCRIPT): $(LDSCRIPT).in
-	$(CC) -E - -P < $^ -o $@
+	$(AM_V_GEN)$(CC) -E - -P < $^ -o $@
 
 # cygwin dll
-$(TEST_DLL_NAME): $(LDSCRIPT) dllfixdbg libdll.a $(VERSION_OFILES) $(LIBSERVER)
-	$(CXX) $(CXXFLAGS) \
+$(PRE_DLL_NAME): $(LDSCRIPT) libdll.a $(VERSION_OFILES) $(LIBSERVER)\
+		  $(newlib_build)/libm.a $(newlib_build)/libc.a
+	$(AM_V_CXXLD)$(CXX) $(CXXFLAGS) \
 	-mno-use-libstdc-wrappers \
 	-Wl,--gc-sections -nostdlib -Wl,-T$(LDSCRIPT) -static \
 	-Wl,--heap=0 -Wl,--out-implib,cygdll.a -shared -o $@ \
@@ -642,17 +636,40 @@ $(TEST_DLL_NAME): $(LDSCRIPT) dllfixdbg libdll.a $(VERSION_OFILES) $(LIBSERVER)
 	-Wl,-whole-archive libdll.a -Wl,-no-whole-archive \
 	$(VERSION_OFILES) \
 	$(LIBSERVER) \
-	$(newlib_build)/libm/libm.a \
-	$(newlib_build)/libc/libc.a \
+	$(newlib_build)/libm.a \
+	$(newlib_build)/libc.a \
 	-lgcc -lkernel32 -lntdll -Wl,-Map,cygwin.map
-	$(srcdir)/dllfixdbg $(OBJDUMP) $(OBJCOPY) $@ cygwin1.dbg
-	@ln -f $@ new-cygwin1.dll
+
+# create cygwin1.dbg file
+$(DBG_DLL_NAME): $(PRE_DLL_NAME)
+	$(AM_V_GEN)$(OBJCOPY) -R .gnu_debuglink_overlay \
+			      --add-gnu-debuglink=/dev/null \
+			      --only-keep-debug \
+			      $(PRE_DLL_NAME) \
+			      $(DBG_DLL_NAME)
+
+# create stripped, temporary DLL, append .gnu_debuglink section, move
+# .gnu_debuglink section in place of .gnu_debuglink_overlay placeholder
+# section and store result in new-cygwin1.dll
+$(NEW_DLL_NAME): $(PRE_DLL_NAME) $(DBG_DLL_NAME)
+	$(AM_V_GEN)TMP_DLL_NAME=$$( mktemp --suffix=.dll ) && \
+	$(OBJCOPY) -g \
+		   --keep-section=.gnu_debuglink_overlay \
+		   --add-gnu-debuglink=$(DBG_DLL_NAME) \
+		   $(PRE_DLL_NAME) $${TMP_DLL_NAME} && \
+	vma=$$( objdump --headers $${TMP_DLL_NAME} | \
+	       awk '/.gnu_debuglink_overlay/{print $$4;}' ) && \
+	$(OBJCOPY) -R .gnu_debuglink_overlay \
+		   --change-section-address .gnu_debuglink=0x$${vma} \
+		   --set-section-flag .gnu_debuglink=contents,readonly,debug,noload \
+		   $${TMP_DLL_NAME} $(NEW_DLL_NAME) && \
+	rm $${TMP_DLL_NAME}
 
 # cygwin import library
 toolopts=--cpu=@target_cpu@ --ar=@AR@ --as=@AS@ --nm=@NM@ --objcopy=@OBJCOPY@
 
 $(DEF_FILE): gendef $(srcdir)/$(TLSOFFSETS_H) $(DIN_FILE) common.din
-	$(srcdir)/gendef --cpu=@target_cpu@ --output-def=$(DEF_FILE) --tlsoffsets=$(srcdir)/$(TLSOFFSETS_H) $(srcdir)/$(DIN_FILE) $(srcdir)/common.din
+	$(AM_V_GEN)$(srcdir)/gendef --cpu=@target_cpu@ --output-def=$(DEF_FILE) --tlsoffsets=$(srcdir)/$(TLSOFFSETS_H) $(srcdir)/$(DIN_FILE) $(srcdir)/common.din
 
 sigfe.s: $(DEF_FILE)
 	@[ -s $@ ] || \
@@ -660,12 +677,12 @@ sigfe.s: $(DEF_FILE)
 	[ -s $@ ] && touch $@
 
 LIBCOS=$(addsuffix .o,$(basename $(LIB_FILES)))
-$(LIB_NAME): $(DEF_FILE) $(LIBCOS) | $(TEST_DLL_NAME)
-	$(srcdir)/mkimport $(toolopts) $(NEW_FUNCTIONS) $@ cygdll.a $(wordlist 2,99,$^)
+$(LIB_NAME): $(DEF_FILE) $(LIBCOS) | $(NEW_DLL_NAME)
+	$(AM_V_GEN)$(srcdir)/mkimport $(toolopts) $(NEW_FUNCTIONS) $@ cygdll.a $(wordlist 2,99,$^)
 
 # cygwin import library used by testsuite
 $(TEST_LIB_NAME): $(LIB_NAME)
-	perl -p -e 'BEGIN{binmode(STDIN); binmode(STDOUT);}; s/cygwin1/cygwin0/g' < $? > $@
+	$(AM_V_GEN)perl -p -e 'BEGIN{binmode(STDIN); binmode(STDOUT);}; s/cygwin1/cygwin0/g' < $? > $@
 
 # sublibs
 # import libraries for some subset of symbols indicated by given objects
@@ -678,32 +695,32 @@ speclib=\
 	--exclude='^_main$$'
 
 libc.a: $(LIB_NAME) libm.a libpthread.a libutil.a
-	$(speclib) $^ -v $(@F)
+	$(AM_V_GEN)$(speclib) $^ -v $(@F)
 
-libm.a: $(LIB_NAME) $(newlib_build)/libm/libm.a $(addsuffix .o,$(basename $(MATH_FILES)))
-	$(speclib) $^ $(@F)
+libm.a: $(LIB_NAME) $(newlib_build)/libm.a $(addsuffix .o,$(basename $(MATH_FILES)))
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 libpthread.a: $(LIB_NAME) pthread.o thread.o libc/call_once.o libc/cnd.o \
 	      libc/mtx.o libc/thrd.o libc/tss.o
-	$(speclib) $^ $(@F)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 libutil.a: $(LIB_NAME) libc/bsdlib.o
-	$(speclib) $^ $(@F)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 libdl.a: $(LIB_NAME) dlfcn.o
-	$(speclib) $^ $(@F)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 libresolv.a: $(LIB_NAME) libc/minires.o
-	$(speclib) $^ $(@F)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 librt.a: $(LIB_NAME) posix_ipc.o
-	$(speclib) $^ $(@F)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 libacl.a: $(LIB_NAME) sec_posixacl.o
-	$(speclib) $^ $(@F)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
-libssp.a: $(LIB_NAME) $(newlib_build)/libc/ssp/lib.a
-	$(speclib) $^ $(@F)
+libssp.a: $(LIB_NAME) $(wildcard $(newlib_build)/libc/ssp/*.o)
+	$(AM_V_GEN)$(speclib) $^ $(@F)
 
 #
 # all
@@ -718,7 +735,8 @@ all-local: $(LIB_NAME) $(TEST_LIB_NAME) $(SUBLIBS)
 clean-local:
 	-rm -f $(BUILT_SOURCES)
 	-rm -f $(DEF_FILE) sigfe.s
-	-rm -f cygwin.sc cygdll.a cygwin.map $(TEST_DLL_NAME) cygwin1.dbg new-cygwin1.dll
+	-rm -f cygwin.sc cygdll.a cygwin.map
+	-rm -f $(PRE_DLL_NAME) $(DBG_DLL_NAME) $(NEW_DLL_NAME)
 	-rm -f $(LIB_NAME) $(TEST_LIB_NAME) $(SUBLIBS)
 	-rm -f version.cc
 
@@ -736,7 +754,7 @@ install-data-local: install-headers install-ldif
 
 install-libs:
 	@$(MKDIR_P) $(DESTDIR)$(bindir)
-	$(INSTALL_PROGRAM) $(TEST_DLL_NAME) $(DESTDIR)$(bindir)/$(DLL_NAME)
+	$(INSTALL_PROGRAM) $(NEW_DLL_NAME) $(DESTDIR)$(bindir)/$(DLL_NAME)
 	@$(MKDIR_P) $(DESTDIR)$(toollibdir)
 	(cd $(DESTDIR)$(toollibdir) && ln -sf $(LIB_NAME) libg.a)
 
@@ -778,7 +796,7 @@ ctags: CTAGS
 tags:  CTAGS
 CTAGS:
 	-cd $(srcdir) && \
-	ctags -R --c++-kinds=+p --fields=+iaS --extra=+q \
+	ctags -R --c++-kinds=+p --fields=+iaS --extras=+q \
 	--regex-C++='/EXPORT_ALIAS *\([a-zA-Z0-9_]*, *([a-zA-Z0-9_]*)\)/\1/' \
 	--regex-C++='/__ASMNAME *\("([a-zA-Z0-9_]+)"\)/\1/' \
 	.

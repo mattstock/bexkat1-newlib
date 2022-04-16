@@ -370,7 +370,7 @@ __sfputs_r (struct _reent *ptr,
 {
 	register int i;
 
-#ifdef _WIDE_ORIENT
+#if defined _WIDE_ORIENT && (!defined _ELIX_LEVEL || _ELIX_LEVEL >= 4)
 	if (fp->_flags2 & __SWID) {
 		wchar_t *p;
 
@@ -406,7 +406,7 @@ __sprint_r (struct _reent *ptr,
 		uio->uio_iovcnt = 0;
 		return (0);
 	}
-#ifdef _WIDE_ORIENT
+#if defined _WIDE_ORIENT && (!defined _ELIX_LEVEL || _ELIX_LEVEL >= 4)
 	if (fp->_flags2 & __SWID) {
 		struct __siov *iov;
 		wchar_t *p;
@@ -517,10 +517,7 @@ extern int _ldcheck (_LONG_DOUBLE *);
 
 #  define _PRINTF_FLOAT_TYPE _LONG_DOUBLE
 #  define _DTOA_R _ldtoa_r
-/* FIXME - frexpl is not yet supported; and cvt infloops if (double)f
-   converts a finite value into infinity.  */
-/* #  define FREXP frexpl */
-#  define FREXP(f,e) ((_LONG_DOUBLE) frexp ((double)f, e))
+#  define FREXP frexpl
 # endif /* !_NO_LONGDBL */
 
 static char *cvt(struct _reent *, _PRINTF_FLOAT_TYPE, int, int, char *, int *,

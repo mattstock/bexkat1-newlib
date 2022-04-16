@@ -582,21 +582,15 @@ LoadDLLfunc (if_indextoname, 8, iphlpapi)
 LoadDLLfunc (if_nametoindex, 4, iphlpapi)
 
 LoadDLLfuncEx2 (DiscardVirtualMemory, 8, kernel32, 1, 127)
-LoadDLLfunc (GetCurrentProcessorNumberEx, 4, kernel32)
-LoadDLLfuncEx (GetLogicalProcessorInformationEx, 12, kernel32, 1)
-LoadDLLfuncEx (GetProcessGroupAffinity, 12, kernel32, 1)
 LoadDLLfunc (GetSystemTimePreciseAsFileTime, 4, kernel32)
-LoadDLLfuncEx (GetThreadGroupAffinity, 8, kernel32, 1)
 LoadDLLfuncEx (IsWow64Process2, 12, kernel32, 1)
 LoadDLLfuncEx (PrefetchVirtualMemory, 16, kernel32, 1)
-LoadDLLfunc (SetThreadGroupAffinity, 12, kernel32)
 
 /* MSDN claims these are exported by kernel32.dll, but only
    QueryUnbiasedInterruptTime actually is.  The others are only
    available via KernelBase.dll. */
 LoadDLLfunc (QueryInterruptTime, 4, KernelBase)
 LoadDLLfunc (QueryInterruptTimePrecise, 4, KernelBase)
-LoadDLLfunc (QueryUnbiasedInterruptTime, 4, KernelBase)
 LoadDLLfunc (QueryUnbiasedInterruptTimePrecise, 4, KernelBase)
 LoadDLLfunc (VirtualAlloc2, 28, KernelBase)
 
@@ -630,6 +624,7 @@ LoadDLLfunc (LdapMapErrorToWin32, 0, wldap32)
 
 LoadDLLfunc (WNetCloseEnum, 4, mpr)
 LoadDLLfunc (WNetEnumResourceW, 16, mpr)
+LoadDLLfunc (WNetGetLastErrorW, 20, mpr)
 LoadDLLfunc (WNetGetProviderNameW, 12, mpr)
 LoadDLLfunc (WNetGetResourceInformationW, 16, mpr)
 LoadDLLfunc (WNetOpenEnumW, 20, mpr)

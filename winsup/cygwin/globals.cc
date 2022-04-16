@@ -20,7 +20,7 @@ HANDLE NO_COPY hProcImpToken;
 HANDLE my_wr_proc_pipe;
 HMODULE NO_COPY cygwin_hmodule;
 HMODULE NO_COPY hntdll;
-int NO_COPY sigExeced;
+LONG NO_COPY sigExeced;
 WCHAR windows_system_directory[MAX_PATH];
 UINT windows_system_directory_length;
 WCHAR system_wow64_directory[MAX_PATH];
@@ -69,7 +69,7 @@ int NO_COPY dynamically_loaded;
 /* Some CYGWIN environment variable variables. */
 bool allow_glob = true;
 bool ignore_case_with_glob;
-bool pipe_byte;
+bool pipe_byte = true; /* Default to byte mode so that C# programs work. */
 bool reset_com;
 bool wincmdln;
 winsym_t allow_winsymlinks = WSYM_default;

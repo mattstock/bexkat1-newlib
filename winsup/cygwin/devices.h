@@ -70,6 +70,7 @@ enum fh_devices
   FH_NETDRIVE= FHDEV (DEV_VIRTFS_MAJOR, 194),
   FH_DEV     = FHDEV (DEV_VIRTFS_MAJOR, 193),
   FH_CYGDRIVE= FHDEV (DEV_VIRTFS_MAJOR, 192),
+  FH_DEV_FD  = FHDEV (DEV_VIRTFS_MAJOR, 191),
 
   FH_SIGNALFD= FHDEV (DEV_VIRTFS_MAJOR, 13),
   FH_TIMERFD = FHDEV (DEV_VIRTFS_MAJOR, 14),
@@ -432,11 +433,12 @@ extern const _device dev_fs_storage;
 #define iscygdrive_dev(devn) (devn == FH_CYGDRIVE)
 
 #define isdev_dev(devn) (devn == FH_DEV)
+#define isdevfd_dev(devn) (devn == FH_DEV_FD)
 
 #define isprocsys_dev(devn) (devn == FH_PROCSYS)
 
 #define isvirtual_dev(devn) \
-  (isproc_dev (devn) || devn == FH_CYGDRIVE || devn == FH_NETDRIVE)
+  (isproc_dev (devn) || devn == FH_CYGDRIVE || devn == FH_NETDRIVE || devn == FH_DEV_FD)
 
 #define iscons_dev(n) \
   ((device::major ((dev_t) (n)) == DEV_CONS_MAJOR) \

@@ -1123,7 +1123,11 @@ unlink (const char *ourname)
       set_errno (EROFS);
       goto done;
     }
-
+  if (isdevfd_dev (devn) || (win32_name.isdevice () && !win32_name.issocket ()))
+    {
+      set_errno (EPERM);
+      goto done;
+    }
   if (!win32_name.exists ())
     {
       debug_printf ("unlinking a nonexistent file");
@@ -3054,10 +3058,10 @@ _cygwin_istext_for_stdio (int fd)
 }
 
 /* internal newlib function */
-extern "C" int _fwalk (struct _reent *ptr, int (*function) (FILE *));
+extern "C" int _fwalk_reent (struct _reent *ptr, int (*function) (struct _reent *, FILE *));
 
 static int
-setmode_helper (FILE *f)
+setmode_helper (struct _reent *ptr __unused, FILE *f)
 {
   if (fileno (f) != _my_tls.locals.setmode_file)
     {
@@ -3133,7 +3137,7 @@ cygwin_setmode (int fd, int mode)
 	_my_tls.locals.setmode_mode = O_TEXT;
       else
 	_my_tls.locals.setmode_mode = O_BINARY;
-      _fwalk (_GLOBAL_REENT, setmode_helper);
+      _fwalk_reent (_GLOBAL_REENT, setmode_helper);
     }
   return res;
 }
@@ -3627,8 +3631,8 @@ seteuid32 (uid_t uid)
 		}
 	      /* If s4uauth fails with status code STATUS_INVALID_PARAMETER,
 		 we're running on a system not implementing MsV1_0S4ULogon
-		 (Windows 7 WOW64, Vista?).  Fall back to create_token in
-		 this single case only. */
+		 (Windows 7 WOW64).  Fall back to create_token in this single
+		 case only. */
 	      debug_printf ("s4uauth failed, try create_token.");
 	      if (!(new_token = create_token (usersid, groups)))
 		{
@@ -4714,7 +4718,7 @@ gen_full_path_at (char *path_ret, int dirfd, const char *pathname,
 	  return -1;
 	}
     }
-  if (pathname && isabspath (pathname))
+  if (pathname && isabspath_strict (pathname))
     stpcpy (path_ret, pathname);
   else
     {

@@ -122,9 +122,8 @@ struct glue_with_file {
   FILE file;
 };
 
-struct _glue *
-__sfmoreglue (struct _reent *d,
-       register int n)
+static struct _glue *
+sfmoreglue (struct _reent *d, int n)
 {
   struct glue_with_file *g;
 
@@ -152,7 +151,7 @@ __sfp (struct _reent *d)
 
   _newlib_sfp_lock_start ();
 
-  if (!_GLOBAL_REENT->__sdidinit)
+  if (_GLOBAL_REENT->__cleanup == NULL)
     __sinit (_GLOBAL_REENT);
   for (g = &_GLOBAL_REENT->__sglue;; g = g->_next)
     {
@@ -160,7 +159,7 @@ __sfp (struct _reent *d)
 	if (fp->_flags == 0)
 	  goto found;
       if (g->_next == NULL &&
-	  (g->_next = __sfmoreglue (d, NDYNAMIC)) == NULL)
+	  (g->_next = sfmoreglue (d, NDYNAMIC)) == NULL)
 	break;
     }
   _newlib_sfp_lock_exit ();
@@ -200,8 +199,8 @@ found:
  * The name `_cleanup' is, alas, fairly well known outside stdio.
  */
 
-void
-_cleanup_r (struct _reent *ptr)
+static void
+cleanup_stdio (struct _reent *ptr)
 {
   int (*cleanup_func) (struct _reent *, FILE *);
 #ifdef _STDIO_BSD_SEMANTICS
@@ -229,14 +228,6 @@ _cleanup_r (struct _reent *ptr)
   (void) _fwalk_reent (ptr, cleanup_func);
 }
 
-#ifndef _REENT_ONLY
-void
-_cleanup (void)
-{
-  _cleanup_r (_GLOBAL_REENT);
-}
-#endif
-
 /*
  * __sinit() is called whenever stdio's internal variables must be set up.
  */
@@ -246,14 +237,14 @@ __sinit (struct _reent *s)
 {
   __sinit_lock_acquire ();
 
-  if (s->__sdidinit)
+  if (s->__cleanup)
     {
       __sinit_lock_release ();
       return;
     }
 
   /* make sure we clean up on exit */
-  s->__cleanup = _cleanup_r;	/* conservative */
+  s->__cleanup = cleanup_stdio;	/* conservative */
 
   s->__sglue._next = NULL;
 #ifndef _REENT_SMALL
@@ -264,11 +255,6 @@ __sinit (struct _reent *s)
 #else
   s->__sglue._niobs = 0;
   s->__sglue._iobs = NULL;
-  /* Avoid infinite recursion when calling __sfp  for _GLOBAL_REENT.  The
-     problem is that __sfp checks for _GLOBAL_REENT->__sdidinit and calls
-     __sinit if it's 0. */
-  if (s == _GLOBAL_REENT)
-    s->__sdidinit = 1;
 # ifndef _REENT_GLOBAL_STDIO_STREAMS
   s->_stdin = __sfp(s);
   s->_stdout = __sfp(s);
@@ -293,8 +279,6 @@ __sinit (struct _reent *s)
   stdout_init (s->_stdout);
   stderr_init (s->_stderr);
 #endif /* _REENT_GLOBAL_STDIO_STREAMS */
-
-  s->__sdidinit = 1;
 
   __sinit_lock_release ();
 }
@@ -330,20 +314,20 @@ __sinit_lock_release (void)
 
 /* Walkable file locking routine.  */
 static int
-__fp_lock (FILE * ptr)
+__fp_lock (struct _reent * ptr __unused, FILE * fp)
 {
-  if (!(ptr->_flags2 & __SNLK))
-    _flockfile (ptr);
+  if (!(fp->_flags2 & __SNLK))
+    _flockfile (fp);
 
   return 0;
 }
 
 /* Walkable file unlocking routine.  */
 static int
-__fp_unlock (FILE * ptr)
+__fp_unlock (struct _reent * ptr __unused, FILE * fp)
 {
-  if (!(ptr->_flags2 & __SNLK))
-    _funlockfile (ptr);
+  if (!(fp->_flags2 & __SNLK))
+    _funlockfile (fp);
 
   return 0;
 }
@@ -353,13 +337,13 @@ __fp_lock_all (void)
 {
   __sfp_lock_acquire ();
 
-  (void) _fwalk (_REENT, __fp_lock);
+  (void) _fwalk_reent (_REENT, __fp_lock);
 }
 
 void
 __fp_unlock_all (void)
 {
-  (void) _fwalk (_REENT, __fp_unlock);
+  (void) _fwalk_reent (_REENT, __fp_unlock);
 
   __sfp_lock_release ();
 }

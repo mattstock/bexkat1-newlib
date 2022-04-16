@@ -205,15 +205,15 @@ sigprocmask (int how, const sigset_t *set, sigset_t *oldset)
 int __reg3
 handle_sigprocmask (int how, const sigset_t *set, sigset_t *oldset, sigset_t& opmask)
 {
-  /* check that how is in right range */
-  if (how != SIG_BLOCK && how != SIG_UNBLOCK && how != SIG_SETMASK)
+  /* check that how is in right range if set is not NULL */
+  if (set && how != SIG_BLOCK && how != SIG_UNBLOCK && how != SIG_SETMASK)
     {
       syscall_printf ("Invalid how value %d", how);
       return EINVAL;
     }
 
   __try
-	{
+    {
       if (oldset)
 	*oldset = opmask;
 
@@ -301,9 +301,14 @@ extern "C" int
 raise (int sig)
 {
   pthread *thread = _my_tls.tid;
-  if (!thread)
+  if (!thread || !__isthreaded)
     return kill (myself->pid, sig);
-  return pthread_kill (thread, sig);
+
+  /* Make sure to return -1 and set errno, as on Linux. */
+  int err = pthread_kill (thread, sig);
+  if (err)
+    set_errno (err);
+  return err ? -1 : 0;
 }
 
 static int

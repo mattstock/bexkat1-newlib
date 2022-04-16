@@ -32,7 +32,7 @@ details. */
 #include "mount.h"
 #include <math.h>
 
-#define _COMPILING_NEWLIB
+#define _LIBC
 #include <dirent.h>
 
 static off_t format_proc_loadavg (void *, char *&);
@@ -665,26 +665,15 @@ format_proc_cpuinfo (void *, char *&destbuf)
 
       WORD cpu_group = cpu_number / num_cpu_per_group;
       KAFFINITY cpu_mask = 1L << (cpu_number % num_cpu_per_group);
+      GROUP_AFFINITY affinity = {
+	.Mask	= cpu_mask,
+	.Group	= cpu_group,
+      };
 
-      if (wincap.has_processor_groups ())
-	{
-	  GROUP_AFFINITY affinity = {
-	    .Mask	= cpu_mask,
-	    .Group	= cpu_group,
-	  };
-
-	  if (!SetThreadGroupAffinity (GetCurrentThread (), &affinity,
-				       &orig_group_affinity))
-	    system_printf ("SetThreadGroupAffinity(%x,%d (%x/%d)) failed %E", cpu_mask, cpu_group, cpu_number, cpu_number);
-	  orig_affinity_mask = 1; /* Just mark success. */
-	}
-      else
-	{
-	  orig_affinity_mask = SetThreadAffinityMask (GetCurrentThread (),
-						      1 << cpu_number);
-	  if (orig_affinity_mask == 0)
-	    debug_printf ("SetThreadAffinityMask failed %E");
-	}
+      if (!SetThreadGroupAffinity (GetCurrentThread (), &affinity,
+				   &orig_group_affinity))
+	system_printf ("SetThreadGroupAffinity(%x,%d (%x/%d)) failed %E", cpu_mask, cpu_group, cpu_number, cpu_number);
+      orig_affinity_mask = 1; /* Just mark success. */
       /* I'm not sure whether the thread changes processor immediately
 	 and I'm not sure whether this function will cause the thread
 	 to be rescheduled */
@@ -1314,6 +1303,13 @@ format_proc_cpuinfo (void *, char *&destbuf)
 
 	  ftcprint (features1,  3, "epb");	/* energy perf bias */
 	}
+      /* cpuid 0x00000007:1 ebx */
+      if (maxf >= 0x00000007)
+	{
+	  cpuid (&unused, &features1, &unused, &unused, 0x00000007, 1);
+
+	  ftcprint (features1,  0, "intel_ppin"); /* Prot Proc Id No */
+	}
       /* cpuid 0x00000010 ebx */
       if (maxf >= 0x00000010)
 	{
@@ -1340,8 +1336,6 @@ format_proc_cpuinfo (void *, char *&destbuf)
 	}
 
 /*	  ftcprint (features1, 11, "pti");*//* Page Table Isolation reqd with Meltdown */
-
-/*	  ftcprint (features1, 14, "intel_ppin");*//* MSR_PPIN_CTL Prot Proc Id No */
 
       /* cpuid 0x00000010:2 ecx */
       if (maxf >= 0x00000010)
@@ -1490,6 +1484,7 @@ format_proc_cpuinfo (void *, char *&destbuf)
 /*	  ftcprint (features1, 24, "ssbd"); */	    /* spec store byp dis */
 	  ftcprint (features1, 25, "virt_ssbd");    /* vir spec store byp dis */
 /*	  ftcprint (features1, 26, "ssb_no"); */    /* ssb fixed in hardware */
+	  ftcprint (features1, 27, "cppc");	    /* collab proc perf ctl */
         }
 
       /* thermal & power cpuid 0x00000006 eax */
@@ -1507,6 +1502,7 @@ format_proc_cpuinfo (void *, char *&destbuf)
 	  ftcprint (features1,  9, "hwp_act_window"); /* HWP activity window */
 	  ftcprint (features1, 10, "hwp_epp");  /* HWP energy perf pref */
 	  ftcprint (features1, 11, "hwp_pkg_req"); /* HWP package level req */
+	  ftcprint (features1, 19, "hfi");	/* Hardware Feedback Interface */
 	}
 
       /* AMD SVM cpuid 0x8000000a edx */
@@ -1583,7 +1579,11 @@ format_proc_cpuinfo (void *, char *&destbuf)
           ftcprint (features1, 16, "tsxldtrk");		   /* TSX Susp Ld Addr Track */
           ftcprint (features1, 18, "pconfig");		   /* platform config */
           ftcprint (features1, 19, "arch_lbr");		   /* last branch records */
+	  ftcprint (features1, 20, "ibt");		   /* Indirect Branch Tracking */
+	  ftcprint (features1, 22, "amx_bf16");	    /* Advanced Matrix eXtensions Brain Float 16 dot product */
           ftcprint (features1, 23, "avx512_fp16");	   /* avx512 fp16 */
+	  ftcprint (features1, 24, "amx_tile");	    /* Advanced Matrix eXtensions Tile matrix multiply */
+	  ftcprint (features1, 25, "amx_int8");	    /* Advanced Matrix eXtensions Int 8 byte dot product */
           ftcprint (features1, 28, "flush_l1d");	   /* flush l1d cache */
           ftcprint (features1, 29, "arch_capabilities");   /* arch cap MSR */
         }
@@ -1668,13 +1668,8 @@ format_proc_cpuinfo (void *, char *&destbuf)
 	}
 
       if (orig_affinity_mask != 0)
-	{
-	  if (wincap.has_processor_groups ())
-	    SetThreadGroupAffinity (GetCurrentThread (), &orig_group_affinity,
-				    NULL);
-	  else
-	    SetThreadAffinityMask (GetCurrentThread (), orig_affinity_mask);
-	}
+	SetThreadGroupAffinity (GetCurrentThread (), &orig_group_affinity,
+				NULL);
       print ("\n");
     }
 
