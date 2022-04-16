@@ -11,7 +11,7 @@
 # the new terms are clearly indicated on the first page of each file where
 # they apply.
 
-# Makefile for libgloss/spro. This is the board support code for the
+# Makefile for libgloss/bexkat1. This is the board support code for the
 # bexkat1 target.
 
 DESTDIR =
@@ -59,7 +59,7 @@ OBJCOPY = `if [ -f ${objroot}/../binutils/objcopy ] ; \
 	then echo ${objroot}/../binutils/objcopy ; \
 	else t='$(program_transform_name)'; echo objcopy | sed -e $$t ; fi`
 
-LD_SCRIPTS = bexkat1-elf-common.ld de2.ld de2.specs max10.ld max10.specs
+LD_SCRIPTS = bexkat1-elf-common.ld de2.ld de2.specs max10.ld max10.specs mister.ld mister.specs
 
 @BUILD_CRT0_TRUE@CRT0		= crt0.o
 @BUILD_CRT0_TRUE@CRT0_INSTALL	= install-crt0
@@ -74,10 +74,18 @@ MAX10_BSP  = libmax10.a
 MAX10_SCRIPTS = max10.specs
 MAX10_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o max10stack.o
 
+MISTER_BSP  = libmister.a
+MISTER_SCRIPTS = mister.specs
+MISTER_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o misterstack.o
+
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
 
-all: ${CRT0} ${DE2_BSP} ${MAX10_BSP}
+all: ${CRT0} ${DE2_BSP} ${MAX10_BSP} ${MISTER_BSP}
+
+$(MISTER_BSP): $(MISTER_OBJS)
+	$(AR) $(ARFLAGS) $@ $?
+	$(RANLIB) $@
 
 $(MAX10_BSP): $(MAX10_OBJS)
 	$(AR) $(ARFLAGS) $@ $?
@@ -98,10 +106,12 @@ syscalls.o: $(srcdir)/syscalls.c
 exit.o: $(srcdir)/exit.S
 de2stack.o: $(srcdir)/de2stack.S
 max10stack.o: $(srcdir)/max10stack.S
+misterstack.o: $(srcdir)/misterstack.S
 
-install: ${CRT0_INSTALL} ${DE2_INSTALL} ${DE1_INSTALL} ${MAX10_INSTALL}
+install: ${CRT0_INSTALL} ${DE2_INSTALL} ${DE1_INSTALL} ${MAX10_INSTALL} ${MISTER_INSTALL}
 	$(INSTALL_DATA) $(DE2_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(DE2_BSP)
 	$(INSTALL_DATA) $(MAX10_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(MAX10_BSP)
+	$(INSTALL_DATA) $(MISTER_BSP) $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$(MISTER_BSP)
 	for x in ${LD_SCRIPTS}; do \
 	  ${INSTALL_DATA} ${srcdir}/$$x $(DESTDIR)${tooldir}/lib/$$x; \
 	done;

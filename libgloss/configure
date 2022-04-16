@@ -2811,6 +2811,11 @@ subdirs="$subdirs aarch64"
 	subdirs="$subdirs mn10300"
 	target_makefile_frag=${srcdir}/config/mn10300.mt
 	;;
+  bexkat1-*-*)
+	ac_config_files="$ac_config_files bexkat1/Makefile"
+
+	subdirs="$subdirs bexkat1"
+	;;
   bfin-*-*)
 	config_bfin=true
 	;;
