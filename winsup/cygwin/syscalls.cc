@@ -6,20 +6,6 @@ This software is a copyrighted work licensed under the terms of the
 Cygwin license.  Please consult the file "CYGWIN_LICENSE" for
 details. */
 
-#define fstat __FOOfstat__
-#define lstat __FOOlstat__
-//#define stat __FOOstat__
-#define _close __FOO_close__
-#define _lseek __FOO_lseek__
-#define _open __FOO_open__
-#define _read __FOO_read__
-#define _write __FOO_write__
-#define _open64 __FOO_open64__
-#define _lseek64 __FOO_lseek64__
-#define _fstat64 __FOO_fstat64__
-#define pread __FOO_pread
-#define pwrite __FOO_pwrite
-
 #include "winsup.h"
 #include "miscfuncs.h"
 #include <sys/stat.h>
@@ -40,12 +26,6 @@ details. */
 #include <iptypes.h>
 #include "ntdll.h"
 
-#undef fstat
-#undef lstat
-//#undef stat
-#undef pread
-#undef pwrite
-
 #include <cygwin/version.h>
 #include "cygerrno.h"
 #include "perprocess.h"
@@ -63,15 +43,7 @@ details. */
 #include "sync.h"
 #include "child_info.h"
 #include <cygwin/fs.h>  /* needed for RENAME_NOREPLACE */
-
-#undef _close
-#undef _lseek
-#undef _open
-#undef _read
-#undef _write
-#undef _open64
-#undef _lseek64
-#undef _fstat64
+#include <sys/reent.h>  /* needed for _fwalk_sglue() declaration */
 
 static int mknod_worker (path_conv &, mode_t, _major_t, _minor_t);
 
@@ -693,8 +665,8 @@ _unlink_nt_post_dir_check (NTSTATUS status, POBJECT_ATTRIBUTES attr, const path_
   return status;
 }
 
-static NTSTATUS
-_unlink_nt (path_conv &pc, bool shareable)
+NTSTATUS
+unlink_nt (path_conv &pc, bool shareable)
 {
   NTSTATUS status;
   HANDLE fh, fh_ro = NULL;
@@ -719,10 +691,12 @@ _unlink_nt (path_conv &pc, bool shareable)
   pc.get_object_attr (attr, sec_none_nih);
 
   /* First check if we can use POSIX unlink semantics: W10 1709+, local NTFS.
-     With POSIX unlink semantics the entire job gets MUCH easier and faster.
-     Just try to do it and if it fails, it fails. */
+     For the OPEN_BY_FILE_ID flag, see MINIMAL_WIN_NTFS_FLAGS comment in
+     fs_info::update.  With POSIX unlink semantics the entire job gets MUCH
+     easier and faster.  Just try to do it and if it fails, it fails. */
   if (wincap.has_posix_unlink_semantics ()
-      && !pc.isremote () && pc.fs_is_ntfs ())
+      && !pc.isremote () && pc.fs_is_ntfs ()
+      && pc.has_attribute (FILE_SUPPORTS_OPEN_BY_FILE_ID))
     {
       FILE_DISPOSITION_INFORMATION_EX fdie;
 
@@ -1090,18 +1064,6 @@ out:
   return status;
 }
 
-NTSTATUS
-unlink_nt (path_conv &pc)
-{
-  return _unlink_nt (pc, false);
-}
-
-NTSTATUS
-unlink_nt_shareable (path_conv &pc)
-{
-  return _unlink_nt (pc, true);
-}
-
 extern "C" int
 unlink (const char *ourname)
 {
@@ -1141,7 +1103,7 @@ unlink (const char *ourname)
       goto done;
     }
 
-  status = unlink_nt (win32_name);
+  status = unlink_nt (win32_name, false);
   if (NT_SUCCESS (status))
     res = 0;
   else
@@ -1204,7 +1166,7 @@ setsid (void)
     syscall_printf ("hmm.  pgid %d pid %d", myself->pgid, myself->pid);
   else
     {
-      myself->ctty = -2;
+      myself->ctty = CTTY_RELEASED;
       myself->sid = myself->pid;
       myself->pgid = myself->pid;
       if (cygheap->ctty)
@@ -1417,7 +1379,7 @@ writev (const int fd, const struct iovec *const iov, const int iovcnt)
 }
 
 extern "C" ssize_t
-pwrite (int fd, void *ptr, size_t len, off_t off)
+pwrite (int fd, const void *ptr, size_t len, off_t off)
 {
   pthread_testcancel ();
 
@@ -1431,7 +1393,7 @@ pwrite (int fd, void *ptr, size_t len, off_t off)
       res = -1;
     }
   else
-    res = cfd->pwrite (ptr, len, off);
+    res = cfd->pwrite (const_cast<void *> (ptr), len, off);
 
   syscall_printf ("%lR = pwrite(%d, %p, %d, %d)", res, fd, ptr, len, off);
   return res;
@@ -1478,17 +1440,6 @@ open (const char *unix_path, int flags, ...)
       int opt = PC_OPEN | PC_SYM_NOFOLLOW_PROCFD;
       opt |= (flags & (O_NOFOLLOW | O_EXCL)) ? PC_SYM_NOFOLLOW
 					     : PC_SYM_FOLLOW;
-      /* This is a temporary kludge until all utilities can catch up
-	 with a change in behavior that implements linux functionality:
-	 opening a tty should not automatically cause it to become the
-	 controlling tty for the process.  */
-      if (!(flags & O_NOCTTY) && fd > 2 && myself->ctty != -2)
-	{
-	  flags |= O_NOCTTY;
-	  /* flag that, if opened, this fhandler could later be capable
-	     of being a controlling terminal if /dev/tty is opened. */
-	  opt |= PC_CTTY;
-	}
 
       /* If we're opening a FIFO, we will call device_access_denied
 	 below.  This leads to a call to fstat, which can use the
@@ -1595,10 +1546,9 @@ open (const char *unix_path, int flags, ...)
 }
 
 EXPORT_ALIAS (open, _open )
-EXPORT_ALIAS (open, _open64 )
 
 extern "C" off_t
-lseek64 (int fd, off_t pos, int dir)
+lseek (int fd, off_t pos, int dir)
 {
   off_t res;
 
@@ -1623,20 +1573,7 @@ lseek64 (int fd, off_t pos, int dir)
   return res;
 }
 
-EXPORT_ALIAS (lseek64, _lseek64)
-
-#ifdef __i386__
-extern "C" _off_t
-lseek (int fd, _off_t pos, int dir)
-{
-  return lseek64 (fd, (off_t) pos, dir);
-}
 EXPORT_ALIAS (lseek, _lseek)
-#else
-EXPORT_ALIAS (lseek64, lseek)
-EXPORT_ALIAS (lseek64, _lseek)
-#endif
-
 
 extern "C" int
 close (int fd)
@@ -1736,41 +1673,19 @@ chown_worker (const char *name, unsigned fmode, uid_t uid, gid_t gid)
 }
 
 extern "C" int
-chown32 (const char * name, uid_t uid, gid_t gid)
+chown (const char * name, uid_t uid, gid_t gid)
 {
   return chown_worker (name, PC_SYM_FOLLOW, uid, gid);
 }
 
-#ifdef __i386__
 extern "C" int
-chown (const char * name, __uid16_t uid, __gid16_t gid)
-{
-  return chown_worker (name, PC_SYM_FOLLOW,
-		       uid16touid32 (uid), gid16togid32 (gid));
-}
-#else
-EXPORT_ALIAS (chown32, chown)
-#endif
-
-extern "C" int
-lchown32 (const char * name, uid_t uid, gid_t gid)
+lchown (const char * name, uid_t uid, gid_t gid)
 {
   return chown_worker (name, PC_SYM_NOFOLLOW, uid, gid);
 }
 
-#ifdef __i386__
 extern "C" int
-lchown (const char * name, __uid16_t uid, __gid16_t gid)
-{
-  return chown_worker (name, PC_SYM_NOFOLLOW,
-		       uid16touid32 (uid), gid16togid32 (gid));
-}
-#else
-EXPORT_ALIAS (lchown32, lchown)
-#endif
-
-extern "C" int
-fchown32 (int fd, uid_t uid, gid_t gid)
+fchown (int fd, uid_t uid, gid_t gid)
 {
   cygheap_fdget cfd (fd);
   if (cfd < 0)
@@ -1789,16 +1704,6 @@ fchown32 (int fd, uid_t uid, gid_t gid)
   syscall_printf ("%R = fchown(%s,...)", res, cfd->get_name ());
   return res;
 }
-
-#ifdef __i386__
-extern "C" int
-fchown (int fd, __uid16_t uid, __gid16_t gid)
-{
-  return fchown32 (fd, uid16touid32 (uid), gid16togid32 (gid));
-}
-#else
-EXPORT_ALIAS (fchown32, fchown)
-#endif
 
 /* umask: POSIX 5.3.3.1 */
 extern "C" mode_t
@@ -1864,26 +1769,6 @@ fchmod (int fd, mode_t mode)
   return cfd->fchmod (FILTERED_MODE (mode));
 }
 
-#ifdef __i386__
-static void
-stat64_to_stat32 (struct stat *src, struct __stat32 *dst)
-{
-  dst->st_dev = ((src->st_dev >> 8) & 0xff00) | (src->st_dev & 0xff);
-  dst->st_ino = ((unsigned) (src->st_ino >> 32)) | (unsigned) src->st_ino;
-  dst->st_mode = src->st_mode;
-  dst->st_nlink = src->st_nlink;
-  dst->st_uid = src->st_uid;
-  dst->st_gid = src->st_gid;
-  dst->st_rdev = ((src->st_rdev >> 8) & 0xff00) | (src->st_rdev & 0xff);
-  dst->st_size = src->st_size;
-  dst->st_atim = src->st_atim;
-  dst->st_mtim = src->st_mtim;
-  dst->st_ctim = src->st_ctim;
-  dst->st_blksize = src->st_blksize;
-  dst->st_blocks = src->st_blocks;
-}
-#endif
-
 static struct stat dev_st;
 static bool dev_st_inited;
 
@@ -1915,7 +1800,7 @@ fhandler_base::stat_fixup (struct stat *buf)
 	{
 	  if (!dev_st_inited)
 	    {
-	      stat64 ("/dev", &dev_st);
+	      stat ("/dev", &dev_st);
 	      dev_st_inited = true;
 	    }
 	  buf->st_dev = dev_st.st_dev;
@@ -1938,7 +1823,7 @@ fhandler_base::stat_fixup (struct stat *buf)
 }
 
 extern "C" int
-fstat64 (int fd, struct stat *buf)
+fstat (int fd, struct stat *buf)
 {
   int res;
 
@@ -1958,42 +1843,14 @@ fstat64 (int fd, struct stat *buf)
 }
 
 extern "C" int
-_fstat64_r (struct _reent *ptr, int fd, struct stat *buf)
-{
-  int ret;
-
-  if ((ret = fstat64 (fd, buf)) == -1)
-    ptr->_errno = get_errno ();
-  return ret;
-}
-
-#ifdef __i386__
-/* This entry point is retained only to serve old 32 bit applications
-built under Cygwin 1.3.x or earlier.  Newer 32 bit apps are redirected
-to fstat64; see NEW_FUNCTIONS in Makefile.in. */
-extern "C" int
-fstat (int fd, struct stat *buf)
-{
-  struct stat buf64;
-  int ret = fstat64 (fd, &buf64);
-  if (!ret)
-    stat64_to_stat32 (&buf64, (struct __stat32 *) buf);
-  return ret;
-}
-
-extern "C" int
 _fstat_r (struct _reent *ptr, int fd, struct stat *buf)
 {
   int ret;
 
   if ((ret = fstat (fd, buf)) == -1)
-    ptr->_errno = get_errno ();
+    _REENT_ERRNO(ptr) = get_errno ();
   return ret;
 }
-#else
-EXPORT_ALIAS (fstat64, fstat)
-EXPORT_ALIAS (_fstat64_r, _fstat_r)
-#endif
 
 /* fsync: P96 6.6.1.1 */
 extern "C" int
@@ -2087,7 +1944,7 @@ sync ()
 }
 
 /* Cygwin internal */
-int __reg2
+int
 stat_worker (path_conv &pc, struct stat *buf)
 {
   int res = -1;
@@ -2124,7 +1981,7 @@ stat_worker (path_conv &pc, struct stat *buf)
 }
 
 extern "C" int
-stat64 (const char *__restrict name, struct stat *__restrict buf)
+stat (const char *__restrict name, struct stat *__restrict buf)
 {
   syscall_printf ("entering");
   path_conv pc (name, PC_SYM_FOLLOW | PC_POSIX | PC_KEEP_HANDLE
@@ -2134,66 +1991,25 @@ stat64 (const char *__restrict name, struct stat *__restrict buf)
 }
 
 extern "C" int
-_stat64_r (struct _reent *__restrict ptr, const char *__restrict name,
+_stat_r (struct _reent *__restrict ptr, const char *__restrict name,
 	   struct stat *buf)
 {
   int ret;
 
-  if ((ret = stat64 (name, buf)) == -1)
-    ptr->_errno = get_errno ();
-  return ret;
-}
-
-#ifdef __i386__
-extern "C" int
-stat (const char *__restrict name, struct stat *__restrict buf)
-{
-  struct stat buf64;
-  int ret = stat64 (name, &buf64);
-  if (!ret)
-    stat64_to_stat32 (&buf64, (struct __stat32 *) buf);
-  return ret;
-}
-
-extern "C" int
-_stat_r (struct _reent *__restrict ptr, const char *__restrict name,
-	 struct stat *__restrict buf)
-{
-  int ret;
-
   if ((ret = stat (name, buf)) == -1)
-    ptr->_errno = get_errno ();
+    _REENT_ERRNO(ptr) = get_errno ();
   return ret;
 }
-#else
-EXPORT_ALIAS (stat64, stat)
-EXPORT_ALIAS (_stat64_r, _stat_r)
-#endif
 
 /* lstat: Provided by SVR4 and 4.3+BSD, POSIX? */
 extern "C" int
-lstat64 (const char *__restrict name, struct stat *__restrict buf)
+lstat (const char *__restrict name, struct stat *__restrict buf)
 {
   syscall_printf ("entering");
   path_conv pc (name, PC_SYM_NOFOLLOW | PC_POSIX | PC_KEEP_HANDLE,
 		stat_suffixes);
   return stat_worker (pc, buf);
 }
-
-#ifdef __i386__
-/* lstat: Provided by SVR4 and 4.3+BSD, POSIX? */
-extern "C" int
-lstat (const char *__restrict name, struct stat *__restrict buf)
-{
-  struct stat buf64;
-  int ret = lstat64 (name, &buf64);
-  if (!ret)
-    stat64_to_stat32 (&buf64, (struct __stat32 *) buf);
-  return ret;
-}
-#else
-EXPORT_ALIAS (lstat64, lstat)
-#endif
 
 extern "C" int
 access (const char *fn, int flags)
@@ -2260,13 +2076,6 @@ nt_path_has_executable_suffix (PUNICODE_STRING upath)
 {
   static const PUNICODE_STRING blessed_executable_suffixes[] =
   {
-    &ro_u_com,
-    &ro_u_dll,	/* Messy, messy.  Per MSDN, the GetBinaryType function is
-		   supposed to return with ERROR_BAD_EXE_FORMAT. if the file
-		   is a DLL.  On 64-bit Windows, this works as expected for
-		   32-bit and 64-bit DLLs.  On 32-bit Windows this only works
-		   for 32-bit DLLs.  For 64-bit DLLs, 32-bit Windows returns
-		   true with the type set to SCS_64BIT_BINARY. */
     &ro_u_exe,
     &ro_u_scr,
     &ro_u_sys,
@@ -2600,10 +2409,12 @@ rename2 (const char *oldpath, const char *newpath, unsigned int at2flags)
 	  __leave;
 	}
 
-      /* POSIX semantics only on local NTFS drives. */
+      /* POSIX semantics only on local NTFS drives. For the OPEN_BY_FILE_ID
+         flag, see MINIMAL_WIN_NTFS_FLAGS comment in fs_info::update. */
       use_posix_semantics = wincap.has_posix_rename_semantics ()
 			    && !oldpc.isremote ()
-			    && oldpc.fs_is_ntfs ();
+			    && oldpc.fs_is_ntfs ()
+			    && oldpc.has_attribute (FILE_SUPPORTS_OPEN_BY_FILE_ID);
 
       /* Opening the file must be part of the transaction.  It's not sufficient
 	 to call only NtSetInformationFile under the transaction.  Therefore we
@@ -2685,7 +2496,7 @@ rename2 (const char *oldpath, const char *newpath, unsigned int at2flags)
 	 unlink_nt returns with STATUS_DIRECTORY_NOT_EMPTY. */
       if (dstpc->isdir ())
 	{
-	  status = unlink_nt (*dstpc);
+	  status = unlink_nt (*dstpc, false);
 	  if (!NT_SUCCESS (status))
 	    {
 	      __seterrno_from_nt_status (status);
@@ -2826,7 +2637,7 @@ skip_pre_W10_checks:
 					? FILE_OPEN_REPARSE_POINT : 0));
 	      if (NT_SUCCESS (status))
 		{
-		  status = unlink_nt (*dstpc);
+		  status = unlink_nt (*dstpc, false);
 		  if (NT_SUCCESS (status))
 		    break;
 		}
@@ -2846,7 +2657,7 @@ skip_pre_W10_checks:
       if (NT_SUCCESS (status))
 	{
 	  if (removepc)
-	    unlink_nt (*removepc);
+	    unlink_nt (*removepc, false);
 	  res = 0;
 	}
       else
@@ -3011,7 +2822,7 @@ ctermid (char *str)
 {
   if (str == NULL)
     str = _my_tls.locals.ttybuf;
-  if (myself->ctty < 0)
+  if (!CTTY_IS_VALID (myself->ctty))
     strcpy (str, "no tty");
   else
     {
@@ -3026,12 +2837,6 @@ ctermid (char *str)
 extern "C" int
 _cygwin_istext_for_stdio (int fd)
 {
-  if (CYGWIN_VERSION_OLD_STDIO_CRLF_HANDLING)
-    {
-      syscall_printf ("fd %d: old API", fd);
-      return 0; /* we do it for old apps, due to getc/putc macros */
-    }
-
   cygheap_fdget cfd (fd, false, false);
   if (cfd < 0)
     {
@@ -3056,9 +2861,6 @@ _cygwin_istext_for_stdio (int fd)
   syscall_printf ("fd %d: defaulting to text", fd);
   return 1;
 }
-
-/* internal newlib function */
-extern "C" int _fwalk_reent (struct _reent *ptr, int (*function) (struct _reent *, FILE *));
 
 static int
 setmode_helper (struct _reent *ptr __unused, FILE *f)
@@ -3137,7 +2939,7 @@ cygwin_setmode (int fd, int mode)
 	_my_tls.locals.setmode_mode = O_TEXT;
       else
 	_my_tls.locals.setmode_mode = O_BINARY;
-      _fwalk_reent (_GLOBAL_REENT, setmode_helper);
+      _fwalk_sglue (_GLOBAL_REENT, setmode_helper, &__sglue);
     }
   return res;
 }
@@ -3175,7 +2977,7 @@ posix_fallocate (int fd, off_t offset, off_t len)
 }
 
 extern "C" int
-ftruncate64 (int fd, off_t length)
+ftruncate (int fd, off_t length)
 {
   int res = -1;
   cygheap_fdget cfd (fd);
@@ -3194,20 +2996,9 @@ ftruncate64 (int fd, off_t length)
   return res;
 }
 
-#ifdef __i386__
-/* ftruncate: P96 5.6.7.1 */
-extern "C" int
-ftruncate (int fd, _off_t length)
-{
-  return ftruncate64 (fd, (off_t)length);
-}
-#else
-EXPORT_ALIAS (ftruncate64, ftruncate)
-#endif
-
 /* truncate: Provided by SVR4 and 4.3+BSD.  Not part of POSIX.1 or XPG3 */
 extern "C" int
-truncate64 (const char *pathname, off_t length)
+truncate (const char *pathname, off_t length)
 {
   int fd;
   int res = -1;
@@ -3216,24 +3007,13 @@ truncate64 (const char *pathname, off_t length)
 
   if (fd != -1)
     {
-      res = ftruncate64 (fd, length);
+      res = ftruncate (fd, length);
       close (fd);
     }
   syscall_printf ("%R = truncate(%s, %D)", res, pathname, length);
 
   return res;
 }
-
-#ifdef __i386__
-/* truncate: Provided by SVR4 and 4.3+BSD.  Not part of POSIX.1 or XPG3 */
-extern "C" int
-truncate (const char *pathname, _off_t length)
-{
-  return truncate64 (pathname, (off_t)length);
-}
-#else
-EXPORT_ALIAS (truncate64, truncate)
-#endif
 
 extern "C" long
 _get_osfhandle (int fd)
@@ -3431,7 +3211,7 @@ mknod_worker (path_conv &pc, mode_t mode, _major_t major, _minor_t minor)
 }
 
 extern "C" int
-mknod32 (const char *path, mode_t mode, dev_t dev)
+mknod (const char *path, mode_t mode, dev_t dev)
 {
   __try
     {
@@ -3493,20 +3273,14 @@ mknod32 (const char *path, mode_t mode, dev_t dev)
 }
 
 extern "C" int
-mknod (const char *_path, mode_t mode, __dev16_t dev)
-{
-  return mknod32 (_path, mode, (dev_t) dev);
-}
-
-extern "C" int
 mkfifo (const char *path, mode_t mode)
 {
-  return mknod32 (path, (mode & ~S_IFMT) | S_IFIFO, 0);
+  return mknod (path, (mode & ~S_IFMT) | S_IFIFO, 0);
 }
 
 /* seteuid: standards? */
 extern "C" int
-seteuid32 (uid_t uid)
+seteuid (uid_t uid)
 {
   debug_printf ("uid: %u myself->uid: %u myself->gid: %u",
 		uid, myself->uid, myself->gid);
@@ -3609,8 +3383,7 @@ seteuid32 (uid_t uid)
   debug_printf ("Found token %p", new_token);
 
   /* If no impersonation token is available, try to authenticate using
-     LSA private data stored password, LSA authentication using our own
-     LSA module, or, as last chance, NtCreateToken. */
+     LSA private data stored password, or, if that fails, S4U logon. */
   if (new_token == NULL)
     {
       if (!(new_token = lsaprivkeyauth (pw_new)))
@@ -3623,23 +3396,9 @@ seteuid32 (uid_t uid)
 	  extract_nt_dom_user (pw_new, domain, user);
 	  if (!(new_token = s4uauth (true, domain, user, status)))
 	    {
-	      if (status != STATUS_INVALID_PARAMETER)
-		{
-		  debug_printf ("s4uauth failed, bail out");
-		  cygheap->user.reimpersonate ();
-		  return -1;
-		}
-	      /* If s4uauth fails with status code STATUS_INVALID_PARAMETER,
-		 we're running on a system not implementing MsV1_0S4ULogon
-		 (Windows 7 WOW64).  Fall back to create_token in this single
-		 case only. */
-	      debug_printf ("s4uauth failed, try create_token.");
-	      if (!(new_token = create_token (usersid, groups)))
-		{
-		  debug_printf ("create_token failed, bail out");
-		  cygheap->user.reimpersonate ();
-		  return -1;
-		}
+	      debug_printf ("s4uauth failed, bail out");
+	      cygheap->user.reimpersonate ();
+	      return -1;
 	    }
 	}
 
@@ -3725,21 +3484,11 @@ seteuid32 (uid_t uid)
   return 0;
 }
 
-#ifdef __i386__
-extern "C" int
-seteuid (__uid16_t uid)
-{
-  return seteuid32 (uid16touid32 (uid));
-}
-#else
-EXPORT_ALIAS (seteuid32, seteuid)
-#endif
-
 /* setuid: POSIX 4.2.2.1 */
 extern "C" int
-setuid32 (uid_t uid)
+setuid (uid_t uid)
 {
-  int ret = seteuid32 (uid);
+  int ret = seteuid (uid);
   if (!ret)
     {
       cygheap->user.real_uid = myself->uid;
@@ -3750,28 +3499,18 @@ setuid32 (uid_t uid)
   return ret;
 }
 
-#ifdef __i386__
 extern "C" int
-setuid (__uid16_t uid)
-{
-  return setuid32 (uid16touid32 (uid));
-}
-#else
-EXPORT_ALIAS (setuid32, setuid)
-#endif
-
-extern "C" int
-setreuid32 (uid_t ruid, uid_t euid)
+setreuid (uid_t ruid, uid_t euid)
 {
   int ret = 0;
   bool tried = false;
   uid_t old_euid = myself->uid;
 
   if (ruid != ILLEGAL_UID && cygheap->user.real_uid != ruid && euid != ruid)
-    tried = !(ret = seteuid32 (ruid));
+    tried = !(ret = seteuid (ruid));
   if (!ret && euid != ILLEGAL_UID)
-    ret = seteuid32 (euid);
-  if (tried && (ret || euid == ILLEGAL_UID) && seteuid32 (old_euid))
+    ret = seteuid (euid);
+  if (tried && (ret || euid == ILLEGAL_UID) && seteuid (old_euid))
     system_printf ("Cannot restore original euid %u", old_euid);
   if (!ret && ruid != ILLEGAL_UID)
     cygheap->user.real_uid = ruid;
@@ -3779,19 +3518,9 @@ setreuid32 (uid_t ruid, uid_t euid)
   return ret;
 }
 
-#ifdef __i386__
-extern "C" int
-setreuid (__uid16_t ruid, __uid16_t euid)
-{
-  return setreuid32 (uid16touid32 (ruid), uid16touid32 (euid));
-}
-#else
-EXPORT_ALIAS (setreuid32, setreuid)
-#endif
-
 /* setegid: from System V.  */
 extern "C" int
-setegid32 (gid_t gid)
+setegid (gid_t gid)
 {
   debug_printf ("new egid: %u current: %u", gid, myself->gid);
 
@@ -3839,67 +3568,34 @@ setegid32 (gid_t gid)
   return 0;
 }
 
-#ifdef __i386__
-extern "C" int
-setegid (__gid16_t gid)
-{
-  return setegid32 (gid16togid32 (gid));
-}
-#else
-EXPORT_ALIAS (setegid32, setegid)
-#endif
-
 /* setgid: POSIX 4.2.2.1 */
 extern "C" int
-setgid32 (gid_t gid)
+setgid (gid_t gid)
 {
-  int ret = setegid32 (gid);
+  int ret = setegid (gid);
   if (!ret)
     cygheap->user.real_gid = myself->gid;
   return ret;
 }
 
-#ifdef __i386__
 extern "C" int
-setgid (__gid16_t gid)
-{
-  int ret = setegid32 (gid16togid32 (gid));
-  if (!ret)
-    cygheap->user.real_gid = myself->gid;
-  return ret;
-}
-#else
-EXPORT_ALIAS (setgid32, setgid)
-#endif
-
-extern "C" int
-setregid32 (gid_t rgid, gid_t egid)
+setregid (gid_t rgid, gid_t egid)
 {
   int ret = 0;
   bool tried = false;
   gid_t old_egid = myself->gid;
 
   if (rgid != ILLEGAL_GID && cygheap->user.real_gid != rgid && egid != rgid)
-    tried = !(ret = setegid32 (rgid));
+    tried = !(ret = setegid (rgid));
   if (!ret && egid != ILLEGAL_GID)
-    ret = setegid32 (egid);
-  if (tried && (ret || egid == ILLEGAL_GID) && setegid32 (old_egid))
+    ret = setegid (egid);
+  if (tried && (ret || egid == ILLEGAL_GID) && setegid (old_egid))
     system_printf ("Cannot restore original egid %u", old_egid);
   if (!ret && rgid != ILLEGAL_GID)
     cygheap->user.real_gid = rgid;
   debug_printf ("real: %u, effective: %u", cygheap->user.real_gid, myself->gid);
   return ret;
 }
-
-#ifdef __i386__
-extern "C" int
-setregid (__gid16_t rgid, __gid16_t egid)
-{
-  return setregid32 (gid16togid32 (rgid), gid16togid32 (egid));
-}
-#else
-EXPORT_ALIAS (setregid32, setregid)
-#endif
 
 /* chroot: privileged Unix system call.  */
 /* FIXME: Not privileged here. How should this be done? */
@@ -4104,13 +3800,13 @@ locked_append (int fd, const void * buf, size_t size)
   int count = 0;
 
   do
-    if ((lock_buffer.l_start = lseek64 (fd, 0, SEEK_END)) != (off_t) -1
-	&& fcntl64 (fd, F_SETLKW, &lock_buffer) != -1)
+    if ((lock_buffer.l_start = lseek (fd, 0, SEEK_END)) != (off_t) -1
+	&& fcntl (fd, F_SETLKW, &lock_buffer) != -1)
       {
-	if (lseek64 (fd, 0, SEEK_END) != (off_t) -1)
+	if (lseek (fd, 0, SEEK_END) != (off_t) -1)
 	  write (fd, buf, size);
 	lock_buffer.l_type = F_UNLCK;
-	fcntl64 (fd, F_SETLK, &lock_buffer);
+	fcntl (fd, F_SETLK, &lock_buffer);
 	break;
       }
   while (count++ < 1000
@@ -4412,15 +4108,10 @@ gethostid (void)
 {
   /* Fetch the globally unique MachineGuid value from
      HKLM/Software/Microsoft/Cryptography and hash it. */
-
-  /* Caution: sizeof long might become > 4 when we go 64 bit, but gethostid
-     is supposed to return a 32 bit value, despite the return type long.
-     That's why hostid is *not* long here. */
   int32_t hostid = 0x40291372; /* Choose a nice start value */
   WCHAR wguid[38];
 
-  reg_key key (HKEY_LOCAL_MACHINE,
-	       KEY_READ | (wincap.is_wow64() ? KEY_WOW64_64KEY : 0),
+  reg_key key (HKEY_LOCAL_MACHINE, KEY_READ,
 	       L"SOFTWARE", L"Microsoft", L"Cryptography", NULL);
   key.get_string (L"MachineGuid", wguid, 38,
 		  L"00000000-0000-0000-0000-000000000000");
@@ -4433,7 +4124,7 @@ gethostid (void)
 
 #define ETC_SHELLS "/etc/shells"
 static int shell_index;
-static struct __sFILE64 *shell_fp;
+static FILE *shell_fp;
 
 extern "C" char *
 getusershell ()
@@ -4452,7 +4143,7 @@ getusershell ()
   static char buf[PATH_MAX];
   int ch, buf_idx;
 
-  if (!shell_fp && !(shell_fp = fopen64 (ETC_SHELLS, "rt")))
+  if (!shell_fp && !(shell_fp = fopen (ETC_SHELLS, "rt")))
     {
       if (def_shells[shell_index])
 	return strcpy (buf, def_shells[shell_index++]);
@@ -4603,22 +4294,22 @@ popen (const char *command, const char *in_type)
          end of the pipe.  Otherwise don't pass our end of the pipe to the
 	 child process. */
       if (pipe_flags & O_CLOEXEC)
-	fcntl64 (__std[stdchild], F_SETFD, 0);
+	fcntl (__std[stdchild], F_SETFD, 0);
       else
-	fcntl64 (myfd, F_SETFD, FD_CLOEXEC);
+	fcntl (myfd, F_SETFD, FD_CLOEXEC);
 
       /* Also don't pass the file handle currently associated with stdin/stdout
 	 to the child.  This function may actually fail if the stdchild fd
 	 is closed.  But that's ok. */
-      int stdchild_state = fcntl64 (stdchild, F_GETFD, 0);
-      fcntl64 (stdchild, F_SETFD, stdchild_state | FD_CLOEXEC);
+      int stdchild_state = fcntl (stdchild, F_GETFD, 0);
+      fcntl (stdchild, F_SETFD, stdchild_state | FD_CLOEXEC);
 
       /* Start a shell process to run the given command without forking. */
-      pid_t pid = ch_spawn.worker ("/bin/sh", argv, cur_environ (), _P_NOWAIT,
+      pid_t pid = ch_spawn.worker ("/bin/sh", argv, environ, _P_NOWAIT,
 				   __std[0], __std[1]);
 
       /* Reinstate the close-on-exec state */
-      fcntl64 (stdchild, F_SETFD, stdchild_state);
+      fcntl (stdchild, F_SETFD, stdchild_state);
 
       /* If pid >= 0 then spawn_guts succeeded.  */
       if (pid >= 0)
@@ -4726,9 +4417,9 @@ gen_full_path_at (char *path_ret, int dirfd, const char *pathname,
 
       if (dirfd == AT_FDCWD)
 	{
-	  cwdstuff::cwd_lock.acquire ();
+	  cwdstuff::acquire_read ();
 	  p = stpcpy (path_ret, cygheap->cwd.get_posix ());
-	  cwdstuff::cwd_lock.release ();
+	  cwdstuff::release_read ();
 	}
       else
 	{
@@ -4870,9 +4561,9 @@ fchownat (int dirfd, const char *pathname, uid_t uid, gid_t gid, int flags)
 	  /* pathname is an empty string.  Operate on dirfd. */
 	  if (dirfd == AT_FDCWD)
 	    {
-	      cwdstuff::cwd_lock.acquire ();
+	      cwdstuff::acquire_read ();
 	      strcpy (path, cygheap->cwd.get_posix ());
-	      cwdstuff::cwd_lock.release ();
+	      cwdstuff::release_read ();
 	    }
 	  else
 	    {
@@ -4915,12 +4606,12 @@ fstatat (int dirfd, const char *__restrict pathname, struct stat *__restrict st,
 	  /* pathname is an empty string.  Operate on dirfd. */
 	  if (dirfd == AT_FDCWD)
 	    {
-	      cwdstuff::cwd_lock.acquire ();
+	      cwdstuff::acquire_read ();
 	      strcpy (path, cygheap->cwd.get_posix ());
-	      cwdstuff::cwd_lock.release ();
+	      cwdstuff::release_read ();
 	    }
 	  else
-	    return fstat64 (dirfd, st);
+	    return fstat (dirfd, st);
 	}
       path_conv pc (path, ((flags & AT_SYMLINK_NOFOLLOW)
 			   ? PC_SYM_NOFOLLOW : PC_SYM_FOLLOW)
@@ -5078,7 +4769,7 @@ mknodat (int dirfd, const char *pathname, mode_t mode, dev_t dev)
       char *path = tp.c_get ();
       if (gen_full_path_at (path, dirfd, pathname))
 	__leave;
-      return mknod32 (path, mode, dev);
+      return mknod (path, mode, dev);
     }
   __except (EFAULT) {}
   __endtry
@@ -5199,7 +4890,7 @@ unlinkat (int dirfd, const char *pathname, int flags)
   return -1;
 }
 
-static int __reg3
+static int
 pipe_worker (int filedes[2], unsigned int psize, int mode)
 {
   fhandler_pipe *fhs[2];
@@ -5286,7 +4977,3 @@ tmpfile (void)
   set_errno (e);
   return fp;
 }
-
-#ifdef __i386__
-EXPORT_ALIAS (tmpfile, tmpfile64)
-#endif

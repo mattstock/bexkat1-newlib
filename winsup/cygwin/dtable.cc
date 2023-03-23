@@ -58,7 +58,7 @@ dtable_init ()
     cygheap->fdtab.extend (NOFILE_INCR, 0);
 }
 
-void __stdcall
+void
 set_std_handle (int fd)
 {
   fhandler_base *fh = cygheap->fdtab[fd];
@@ -323,7 +323,7 @@ dtable::init_std_file_from_handle (int fd, HANDLE handle)
 	   || GetNumberOfConsoleInputEvents (handle, (DWORD *) &buf))
     {
       /* Console I/O */
-      if (myself->ctty > 0)
+      if (CTTY_IS_VALID (myself->ctty))
 	dev.parse (myself->ctty);
       else
 	{
@@ -603,10 +603,10 @@ fh_alloc (path_conv& pc)
 	      fhraw = cnew_no_ctor (fhandler_console, -1);
 	      debug_printf ("not called from open for /dev/tty");
 	    }
-	  else if (myself->ctty <= 0 && last_tty_dev
+	  else if (!CTTY_IS_VALID (myself->ctty) && last_tty_dev
 		   && !myself->set_ctty (fh_last_tty_dev, 0))
 	    debug_printf ("no /dev/tty assigned");
-	  else if (myself->ctty > 0)
+	  else if (CTTY_IS_VALID (myself->ctty))
 	    {
 	      debug_printf ("determining /dev/tty assignment for ctty %p", myself->ctty);
 	      if (iscons_dev (myself->ctty))
@@ -682,7 +682,7 @@ build_fh_pc (path_conv& pc)
 
   /* Keep track of the last tty-like thing opened.  We could potentially want
      to open it if /dev/tty is referenced. */
-  if (myself->ctty > 0 || !fh->is_tty () || !pc.isctty_capable ())
+  if (CTTY_IS_VALID (myself->ctty) || !fh->is_tty () || !pc.isctty_capable ())
     last_tty_dev = FH_NADA;
   else
     last_tty_dev = fh->dev ();
@@ -763,13 +763,6 @@ dtable::dup3 (int oldfd, int newfd, int flags)
       set_errno (EINVAL);
       return -1;
     }
-
-  /* This is a temporary kludge until all utilities can catch up with
-     a change in behavior that implements linux functionality:  opening
-     a tty should not automatically cause it to become the controlling
-     tty for the process.  */
-  if (newfd > 2)
-    flags |= O_NOCTTY;
 
   if ((newfh = dup_worker (fds[oldfd], flags)) == NULL)
     {
@@ -913,6 +906,8 @@ dtable::fixup_after_exec ()
 	else if (i <= 2)
 	  SetStdHandle (std_consts[i], fh->get_output_handle ());
       }
+  if (cygheap->ctty)
+    cygheap->ctty->fixup_after_exec ();
 }
 
 void
@@ -939,6 +934,9 @@ dtable::fixup_after_fork (HANDLE parent)
 	else if (i <= 2)
 	  SetStdHandle (std_consts[i], fh->get_output_handle ());
       }
+
+  if (cygheap->ctty)
+    cygheap->ctty->fixup_after_fork (parent);
 }
 
 static void

@@ -4,12 +4,70 @@
 
 <sect1 id="ov-new"><title>What's new and what changed in Cygwin</title>
 
+<sect2 id="ov-new3.5"><title>What's new and what changed in 3.5</title>
+
+<itemizedlist mark="bullet">
+
+<listitem><para>
+Drop support for Windows 7, Windows 8, Server 2008 R2 and Server 2012.
+</para></listitem>
+
+<listitem><para>
+The console device gets accessible from other terminals such as other
+consoles and ptys. Thanks to this new feature, GNU screen and tmux now
+work in the console.
+</para></listitem>
+
+<listitem><para>
+newgrp(1) tool.
+</para></listitem>
+
+<listitem><para>
+cygcheck has new options searching for available packages in the
+cygwin distro, as well as getting extended info on available and
+installed packages.
+</para></listitem>
+
+<listitem><para>
+fnmatch(3) and glob(3) now support named character classes, equivalence
+class expressions, and collating symbols in the search pattern, i.e.,
+[:alnum:], [=a=], [.aa.].
+</para></listitem>
+
+<listitem><para>
+Introduce /proc/codesets and /proc/locales with information on supported
+codesets and locales for all interested parties.  Locale(1) opens these
+files and uses the info for printing locale info like any other process
+could do.
+</para></listitem>
+
+<listitem><para>
+Add support for GB18030 codeset.
+</para></listitem>
+
+</itemizedlist>
+
+</sect2>
+
 <sect2 id="ov-new3.4"><title>What's new and what changed in 3.4</title>
 
 <itemizedlist mark="bullet">
 
 <listitem><para>
 Drop support for Vista and Server 2008.
+</para></listitem>
+
+<listitem><para>
+Drop support for 32 bit Windows and WOW64.
+</para></listitem>
+
+<listitem><para>
+Allow to run with full ASLR enabled and enable on Cygwin DLL by default.
+</para></listitem>
+
+<listitem><para>
+Remove any special handling for the .com filename suffix. It has to
+be used always explicitely.
 </para></listitem>
 
 <listitem><para>
@@ -23,6 +81,19 @@ Add code to handle setrlimit(RLIMIT_AS).
 <listitem><para>
 The CYGWIN=pipe_byte option is now set by default, so that pipes are
 opened in byte mode rather than message mode.
+</para></listitem>
+
+<listitem><para>
+Handle UDP_SEGMENT and UDP_GRO socket options.
+</para></listitem>
+
+<listitem><para>
+The stdio input functions no longer try again to read after EOF.
+</para></listitem>
+
+<listitem><para>
+The default values of FD_SETSIZE and NOFILE are now 1024 and 3200,
+respectively.
 </para></listitem>
 
 </itemizedlist>

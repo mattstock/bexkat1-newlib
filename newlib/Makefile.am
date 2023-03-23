@@ -63,13 +63,18 @@ AM_MAKEFLAGS = \
 
 FLAGS_TO_PASS=$(AM_MAKEFLAGS)
 
+srcroot = $(top_srcdir)/..
 tooldir = $(exec_prefix)/$(host_alias)
 toollibdir = $(tooldir)/lib$(MULTISUBDIR)
 
 # These are useful for standalone object files like crt0.o.
 AM_CFLAGS = $(AM_CFLAGS_$(subst /,_,$(@D))) $(AM_CFLAGS_$(subst /,_,$(@D)_$(<F)))
 AM_CCASFLAGS = $(AM_CCASFLAGS_$(subst /,_,$(@D))) $(AM_CCASFLAGS_$(subst /,_,$(@D)_$(<F)))
+if HAVE_LIBC_MACHINE_ARM
+AM_CPPFLAGS = $(NEWLIB_CFLAGS) $(TARGET_CFLAGS) $(AM_CPPFLAGS_$(subst /,_,$(@D))) $(AM_CPPFLAGS_$(subst /,_,$(@D)_$(<F))) -idirafter $(srcroot)/include
+else
 AM_CPPFLAGS = $(NEWLIB_CFLAGS) $(TARGET_CFLAGS) $(AM_CPPFLAGS_$(subst /,_,$(@D))) $(AM_CPPFLAGS_$(subst /,_,$(@D)_$(<F)))
+endif
 
 toollib_LIBRARIES = libm.a \
 	libc.a
@@ -441,6 +446,9 @@ clean-local:
 TEXI2DVI = texi2dvi -E
 
 TEXINFO_TEX = ../texinfo/texinfo.tex
+
+XMLTO_MAN_QUIET_=--stringparam man.output.quietly=1
+XMLTO_MAN_QUIET=$(XMLTO_MAN_QUIET_$(V))
 
 if HAVE_DOC
 include doc/Makefile.inc

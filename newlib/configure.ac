@@ -142,16 +142,16 @@ AC_ARG_ENABLE(newlib-atexit-dynamic-alloc,
 
 dnl Support --enable-newlib-global-atexit
 dnl Enable atexit data structure as global variables to save memory usage in
-dnl _reent.
+dnl _reent.  This is no longer optional.  It is enabled in all Newlib
+dnl configurations.
 AC_ARG_ENABLE(newlib-global-atexit,
 [  --enable-newlib-global-atexit	enable atexit data structure as global],
 [if test "${newlib_global_atexit+set}" != set; then
   case "${enableval}" in
     yes) newlib_global_atexit=yes ;;
-    no)  newlib_global_atexit=no  ;;
     *)   AC_MSG_ERROR(bad value ${enableval} for newlib-global-atexit option) ;;
   esac
- fi], [newlib_global_atexit=no])dnl
+ fi], [newlib_global_atexit=yes])dnl
 
 dnl Support --enable-newlib-reent-small
 AC_ARG_ENABLE(newlib-reent-small,
@@ -162,14 +162,36 @@ AC_ARG_ENABLE(newlib-reent-small,
   *)   AC_MSG_ERROR(bad value ${enableval} for newlib-reent-small option) ;;
  esac], [newlib_reent_small=])dnl
 
+dnl Support --enable-newlib-reent-binary-compat
+AC_ARG_ENABLE(newlib-reent-binary-compat,
+[  --enable-newlib-reent-binary-compat   enable backward binary compatibility for struct _reent],
+[if test "${newlib_reent_binary_compat+set}" != set; then
+  case "${enableval}" in
+    yes) newlib_reent_binary_compat=yes ;;
+    no)  newlib_reent_binary_compat=no  ;;
+    *)   AC_MSG_ERROR(bad value ${enableval} for newlib-enable-reent-binary-compat option) ;;
+  esac
+ fi], [newlib_reent_binary_compat=no])dnl
+
+dnl Support --enable-newlib-reent-thread-local
+AC_ARG_ENABLE(newlib-reent-thread-local,
+[  --enable-newlib-reent-thread-local   enable thread-local storage objects as a replacment for struct _reent members],
+[if test "${newlib_reent_thread_local+set}" != set; then
+  case "${enableval}" in
+    yes) newlib_reent_thread_local=yes ;;
+    no)  newlib_reent_thread_local=no  ;;
+    *)   AC_MSG_ERROR(bad value ${enableval} for newlib-enable-reent-thread-local option) ;;
+  esac
+ fi], [newlib_reent_thread_local=no])dnl
+
 dnl Support --enable-newlib-global-stdio-streams
+dnl This is no longer optional.  It is enabled in all Newlib configurations.
 AC_ARG_ENABLE(newlib-global-stdio-streams,
 [  --enable-newlib-global-stdio-streams   enable global stdio streams],
 [case "${enableval}" in
   yes) newlib_global_stdio_streams=yes;;
-  no)  newlib_global_stdio_streams=no ;;
   *)   AC_MSG_ERROR(bad value ${enableval} for newlib-global-stdio-streams option) ;;
- esac], [newlib_global_stdio_streams=])dnl
+ esac], [newlib_global_stdio_streams=yes])dnl
  
 dnl Support --disable-newlib-fvwrite-in-streamio
 AC_ARG_ENABLE(newlib-fvwrite-in-streamio,
@@ -388,6 +410,11 @@ EOF
 fi
 AC_SUBST(EXEEXT_FOR_BUILD)
 
+AC_DEFINE(_NEWLIB_VERSION,"NEWLIB_VERSION","The newlib version in string format.")
+AC_DEFINE(__NEWLIB__,NEWLIB_MAJOR_VERSION,"The newlib major version number.")
+AC_DEFINE(__NEWLIB_MINOR__,NEWLIB_MINOR_VERSION,"The newlib minor version number.")
+AC_DEFINE(__NEWLIB_PATCHLEVEL__,NEWLIB_PATCHLEVEL_VERSION,"The newlib patch level.")
+
 if test "${newlib_elix_level}" -gt "0"; then
   AC_DEFINE_UNQUOTED(_ELIX_LEVEL, ${newlib_elix_level}, [EL/IX level])
 fi
@@ -420,10 +447,12 @@ if test "${newlib_reent_small}" = "yes"; then
   AC_DEFINE(_WANT_REENT_SMALL, 1, [Optional reentrant struct support.  Used mostly on platforms with very restricted storage.])
 fi
 
-if test "${newlib_global_stdio_streams}" = "yes"; then
-  AC_DEFINE(_WANT_REENT_GLOBAL_STDIO_STREAMS, 1,
-	    [Define to move the stdio stream FILE objects out of struct _reent and make them global.
-	     The stdio stream pointers of struct _reent are initialized to point to the global stdio FILE stream objects.])
+if test "${newlib_reent_binary_compat}" = "yes"; then
+  AC_DEFINE(_WANT_REENT_BACKWARD_BINARY_COMPAT, 1, [Define to enable backward binary compatibility for struct _reent.])
+fi
+
+if test "${newlib_reent_thread_local}" = "yes"; then
+  AC_DEFINE(_WANT_REENT_THREAD_LOCAL, 1, [Define to enable thread-local storage objects as a replacment for struct _reent members.])
 fi
 
 _mb_len_max=1
@@ -453,10 +482,6 @@ fi
 
 if test "${newlib_atexit_dynamic_alloc}" = "yes"; then
   AC_DEFINE(_ATEXIT_DYNAMIC_ALLOC, 1, [If atexit() may dynamically allocate space for cleanup functions.])
-fi
-
-if test "${newlib_global_atexit}" = "yes"; then
-  AC_DEFINE(_REENT_GLOBAL_ATEXIT, 1, [Define if declare atexit data as global.])
 fi
 
 if test "${newlib_fvwrite_in_streamio}" = "yes"; then

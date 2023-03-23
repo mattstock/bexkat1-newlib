@@ -582,7 +582,6 @@ PACKAGE_BUGREPORT=''
 PACKAGE_URL=''
 
 ac_no_link=no
-enable_option_checking=no
 ac_subst_vars='am__EXEEXT_FALSE
 am__EXEEXT_TRUE
 LTLIBOBJS
@@ -602,6 +601,8 @@ MIPS_PART_SPECIFIC_OBJ
 MCORE_BSP_PREFIX
 M68K_TARGET
 I386_CPPFLAGS
+ARM_OBJTYPE
+AARCH64_OBJTYPE
 CPP
 RANLIB
 LD
@@ -629,16 +630,32 @@ CPPFLAGS
 LDFLAGS
 CFLAGS
 CC
+NEED_TOP_INCLUDE_DIR_FALSE
+NEED_TOP_INCLUDE_DIR_TRUE
 CONFIG_WINCE_FALSE
 CONFIG_WINCE_TRUE
+CONFIG_RISCV_FALSE
+CONFIG_RISCV_TRUE
+CONFIG_NIOS2_FALSE
+CONFIG_NIOS2_TRUE
 CONFIG_LM32_FALSE
 CONFIG_LM32_TRUE
 CONFIG_LIBNOSYS_FALSE
 CONFIG_LIBNOSYS_TRUE
 CONFIG_IQ2000_FALSE
 CONFIG_IQ2000_TRUE
+CONFIG_D30V_FALSE
+CONFIG_D30V_TRUE
+CONFIG_CSKY_FALSE
+CONFIG_CSKY_TRUE
 CONFIG_BFIN_FALSE
 CONFIG_BFIN_TRUE
+CONFIG_ARM_FALSE
+CONFIG_ARM_TRUE
+CONFIG_ARC_FALSE
+CONFIG_ARC_TRUE
+CONFIG_AARCH64_FALSE
+CONFIG_AARCH64_TRUE
 subdirs
 HAVE_MULTISUBDIR_FALSE
 HAVE_MULTISUBDIR_TRUE
@@ -686,6 +703,8 @@ build
 INSTALL_DATA
 INSTALL_SCRIPT
 INSTALL_PROGRAM
+MAY_SUPPLY_SYSCALLS_FALSE
+MAY_SUPPLY_SYSCALLS_TRUE
 target_alias
 host_alias
 build_alias
@@ -728,6 +747,7 @@ ac_subst_files='host_makefile_frag
 target_makefile_frag'
 ac_user_opts='
 enable_option_checking
+enable_newlib_supplied_syscalls
 enable_silent_rules
 enable_maintainer_mode
 enable_dependency_tracking
@@ -744,8 +764,7 @@ CPPFLAGS
 CCAS
 CCASFLAGS
 CPP'
-ac_subdirs_all='aarch64
-arm'
+
 
 # Initialize some variables set by options.
 ac_init_help=
@@ -1364,6 +1383,7 @@ Optional Features:
   --disable-option-checking  ignore unrecognized --enable/--with options
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
+  --disable-newlib-supplied-syscalls disable newlib from supplying syscalls
   --enable-silent-rules   less verbose build output (undo: "make V=1")
   --disable-silent-rules  verbose build output (undo: "make V=0")
   --enable-maintainer-mode
@@ -1932,6 +1952,26 @@ ac_config_guess="$SHELL $ac_aux_dir/config.guess"  # Please don't use this var.
 ac_config_sub="$SHELL $ac_aux_dir/config.sub"  # Please don't use this var.
 ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
 
+
+
+# Check whether --enable-newlib-supplied-syscalls was given.
+if test "${enable_newlib_supplied_syscalls+set}" = set; then :
+  enableval=$enable_newlib_supplied_syscalls; case "${enableval}" in
+  yes) newlib_may_supply_syscalls=yes ;;
+  no)  newlib_may_supply_syscalls=no ;;
+  *)   as_fn_error $? "bad value ${enableval} for newlib-supplied-syscalls option" "$LINENO" 5 ;;
+ esac
+else
+  newlib_may_supply_syscalls=yes
+fi
+
+ if test x${newlib_may_supply_syscalls} = xyes; then
+  MAY_SUPPLY_SYSCALLS_TRUE=
+  MAY_SUPPLY_SYSCALLS_FALSE='#'
+else
+  MAY_SUPPLY_SYSCALLS_TRUE='#'
+  MAY_SUPPLY_SYSCALLS_FALSE=
+fi
 
 
 # Find a good install program.  We prefer a C program (faster),
@@ -2712,21 +2752,14 @@ target_makefile_frag=${srcdir}/config/default.mt
 
 case "${target}" in
   aarch64*-*-*)
-
-
-subdirs="$subdirs aarch64"
-
+	config_aarch64=true
 	config_testsuite=true
 	;;
   arc*-*-*)
-	ac_config_files="$ac_config_files arc/Makefile"
-
-	subdirs="$subdirs arc"
+	config_arc=true
 	;;
   csky*-*-*)
-	ac_config_files="$ac_config_files csky/Makefile"
-
-	subdirs="$subdirs csky"
+	config_csky=true
 	;;
   epiphany-*-*)
 	ac_config_files="$ac_config_files epiphany/Makefile"
@@ -2789,9 +2822,7 @@ subdirs="$subdirs aarch64"
 	target_makefile_frag=${srcdir}/config/mips.mt
 	;;
   riscv*-*-*)
-	ac_config_files="$ac_config_files riscv/Makefile"
-
-	subdirs="$subdirs riscv"
+	config_riscv=true
 	;;
   powerpc-*-*|powerpcle-*-*)
 	ac_config_files="$ac_config_files rs6000/Makefile"
@@ -2835,9 +2866,7 @@ subdirs="$subdirs aarch64"
 	subdirs="$subdirs crx"
 	;;
   d30v-*-*)
-	ac_config_files="$ac_config_files d30v/Makefile"
-
-	subdirs="$subdirs d30v"
+	config_d30v=true
 	;;
   fr30-*-*)
 	ac_config_files="$ac_config_files fr30/Makefile"
@@ -2926,8 +2955,8 @@ subdirs="$subdirs aarch64"
 	subdirs="$subdirs rx"
 	;;
   arm*-*-elf | arm*-*-coff | arm*-*-*)
-	subdirs="$subdirs arm"
-
+	config_arm=true
+	host_makefile_frag=${srcdir}/config/arm.mh
 	;;
   spu-*-elf)
 	ac_config_files="$ac_config_files spu/Makefile"
@@ -2957,11 +2986,34 @@ subdirs="$subdirs aarch64"
 	subdirs="$subdirs pru"
 	;;
   nios2-*-*)
-	ac_config_files="$ac_config_files nios2/Makefile"
-
-	subdirs="$subdirs nios2"
+	config_nios2=true
 	;;
 esac
+
+
+   if test x$config_aarch64 = xtrue; then
+  CONFIG_AARCH64_TRUE=
+  CONFIG_AARCH64_FALSE='#'
+else
+  CONFIG_AARCH64_TRUE='#'
+  CONFIG_AARCH64_FALSE=
+fi
+
+   if test x$config_arc = xtrue; then
+  CONFIG_ARC_TRUE=
+  CONFIG_ARC_FALSE='#'
+else
+  CONFIG_ARC_TRUE='#'
+  CONFIG_ARC_FALSE=
+fi
+
+   if test x$config_arm = xtrue; then
+  CONFIG_ARM_TRUE=
+  CONFIG_ARM_FALSE='#'
+else
+  CONFIG_ARM_TRUE='#'
+  CONFIG_ARM_FALSE=
+fi
 
    if test x$config_bfin = xtrue; then
   CONFIG_BFIN_TRUE=
@@ -2969,6 +3021,22 @@ esac
 else
   CONFIG_BFIN_TRUE='#'
   CONFIG_BFIN_FALSE=
+fi
+
+   if test x$config_csky = xtrue; then
+  CONFIG_CSKY_TRUE=
+  CONFIG_CSKY_FALSE='#'
+else
+  CONFIG_CSKY_TRUE='#'
+  CONFIG_CSKY_FALSE=
+fi
+
+   if test x$config_d30v = xtrue; then
+  CONFIG_D30V_TRUE=
+  CONFIG_D30V_FALSE='#'
+else
+  CONFIG_D30V_TRUE='#'
+  CONFIG_D30V_FALSE=
 fi
 
    if test x$config_iq2000 = xtrue; then
@@ -2995,6 +3063,22 @@ else
   CONFIG_LM32_FALSE=
 fi
 
+   if test x$config_nios2 = xtrue; then
+  CONFIG_NIOS2_TRUE=
+  CONFIG_NIOS2_FALSE='#'
+else
+  CONFIG_NIOS2_TRUE='#'
+  CONFIG_NIOS2_FALSE=
+fi
+
+   if test x$config_riscv = xtrue; then
+  CONFIG_RISCV_TRUE=
+  CONFIG_RISCV_FALSE='#'
+else
+  CONFIG_RISCV_TRUE='#'
+  CONFIG_RISCV_FALSE=
+fi
+
    if test x$config_wince = xtrue; then
   CONFIG_WINCE_TRUE=
   CONFIG_WINCE_FALSE='#'
@@ -3003,6 +3087,15 @@ else
   CONFIG_WINCE_FALSE=
 fi
 
+
+
+ if test x$config_arm = xtrue; then
+  NEED_TOP_INCLUDE_DIR_TRUE=
+  NEED_TOP_INCLUDE_DIR_FALSE='#'
+else
+  NEED_TOP_INCLUDE_DIR_TRUE='#'
+  NEED_TOP_INCLUDE_DIR_FALSE=
+fi
 
 
 
@@ -4818,6 +4911,25 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 
 
+AARCH64_OBJTYPE=
+case "${target}" in
+  *-*-elf)
+	AARCH64_OBJTYPE=elf-
+	;;
+esac
+
+
+ARM_OBJTYPE=
+case "${target}" in
+  *-*-elf | *-*-eabi* | *-*-tirtos*)
+	ARM_OBJTYPE=elf-
+	;;
+  *-*-coff)
+	ARM_OBJTYPE=coff-
+	;;
+esac
+
+
 I386_CPPFLAGS=
 case "${target}" in
   i[3456]86-*-coff)
@@ -5172,6 +5284,10 @@ LIBOBJS=$ac_libobjs
 LTLIBOBJS=$ac_ltlibobjs
 
 
+if test -z "${MAY_SUPPLY_SYSCALLS_TRUE}" && test -z "${MAY_SUPPLY_SYSCALLS_FALSE}"; then
+  as_fn_error $? "conditional \"MAY_SUPPLY_SYSCALLS\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking that generated files are newer than configure" >&5
 $as_echo_n "checking that generated files are newer than configure... " >&6; }
    if test -n "$am_sleep_pid"; then
@@ -5200,8 +5316,28 @@ if test -z "${HAVE_MULTISUBDIR_TRUE}" && test -z "${HAVE_MULTISUBDIR_FALSE}"; th
   as_fn_error $? "conditional \"HAVE_MULTISUBDIR\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
+if test -z "${CONFIG_AARCH64_TRUE}" && test -z "${CONFIG_AARCH64_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_AARCH64\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_ARC_TRUE}" && test -z "${CONFIG_ARC_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_ARC\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_ARM_TRUE}" && test -z "${CONFIG_ARM_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_ARM\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
 if test -z "${CONFIG_BFIN_TRUE}" && test -z "${CONFIG_BFIN_FALSE}"; then
   as_fn_error $? "conditional \"CONFIG_BFIN\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_CSKY_TRUE}" && test -z "${CONFIG_CSKY_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_CSKY\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_D30V_TRUE}" && test -z "${CONFIG_D30V_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_D30V\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${CONFIG_IQ2000_TRUE}" && test -z "${CONFIG_IQ2000_FALSE}"; then
@@ -5216,8 +5352,20 @@ if test -z "${CONFIG_LM32_TRUE}" && test -z "${CONFIG_LM32_FALSE}"; then
   as_fn_error $? "conditional \"CONFIG_LM32\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
+if test -z "${CONFIG_NIOS2_TRUE}" && test -z "${CONFIG_NIOS2_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_NIOS2\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_RISCV_TRUE}" && test -z "${CONFIG_RISCV_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_RISCV\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
 if test -z "${CONFIG_WINCE_TRUE}" && test -z "${CONFIG_WINCE_FALSE}"; then
   as_fn_error $? "conditional \"CONFIG_WINCE\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${NEED_TOP_INCLUDE_DIR_TRUE}" && test -z "${NEED_TOP_INCLUDE_DIR_FALSE}"; then
+  as_fn_error $? "conditional \"NEED_TOP_INCLUDE_DIR\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${AMDEP_TRUE}" && test -z "${AMDEP_FALSE}"; then
@@ -5840,8 +5988,6 @@ for ac_config_target in $ac_config_targets
 do
   case $ac_config_target in
     "config.h") CONFIG_HEADERS="$CONFIG_HEADERS config.h" ;;
-    "arc/Makefile") CONFIG_FILES="$CONFIG_FILES arc/Makefile" ;;
-    "csky/Makefile") CONFIG_FILES="$CONFIG_FILES csky/Makefile" ;;
     "epiphany/Makefile") CONFIG_FILES="$CONFIG_FILES epiphany/Makefile" ;;
     "i386/Makefile") CONFIG_FILES="$CONFIG_FILES i386/Makefile" ;;
     "m32r/Makefile") CONFIG_FILES="$CONFIG_FILES m32r/Makefile" ;;
@@ -5853,14 +5999,12 @@ do
     "sparc_leon/Makefile") CONFIG_FILES="$CONFIG_FILES sparc_leon/Makefile" ;;
     "sparc/Makefile") CONFIG_FILES="$CONFIG_FILES sparc/Makefile" ;;
     "mips/Makefile") CONFIG_FILES="$CONFIG_FILES mips/Makefile" ;;
-    "riscv/Makefile") CONFIG_FILES="$CONFIG_FILES riscv/Makefile" ;;
     "rs6000/Makefile") CONFIG_FILES="$CONFIG_FILES rs6000/Makefile" ;;
     "mn10200/Makefile") CONFIG_FILES="$CONFIG_FILES mn10200/Makefile" ;;
     "mn10300/Makefile") CONFIG_FILES="$CONFIG_FILES mn10300/Makefile" ;;
     "cr16/Makefile") CONFIG_FILES="$CONFIG_FILES cr16/Makefile" ;;
     "cris/Makefile") CONFIG_FILES="$CONFIG_FILES cris/Makefile" ;;
     "crx/Makefile") CONFIG_FILES="$CONFIG_FILES crx/Makefile" ;;
-    "d30v/Makefile") CONFIG_FILES="$CONFIG_FILES d30v/Makefile" ;;
     "fr30/Makefile") CONFIG_FILES="$CONFIG_FILES fr30/Makefile" ;;
     "frv/Makefile") CONFIG_FILES="$CONFIG_FILES frv/Makefile" ;;
     "ft32/Makefile") CONFIG_FILES="$CONFIG_FILES ft32/Makefile" ;;
@@ -5881,7 +6025,6 @@ do
     "tic6x/Makefile") CONFIG_FILES="$CONFIG_FILES tic6x/Makefile" ;;
     "or1k/Makefile") CONFIG_FILES="$CONFIG_FILES or1k/Makefile" ;;
     "pru/Makefile") CONFIG_FILES="$CONFIG_FILES pru/Makefile" ;;
-    "nios2/Makefile") CONFIG_FILES="$CONFIG_FILES nios2/Makefile" ;;
     "depfiles") CONFIG_COMMANDS="$CONFIG_COMMANDS depfiles" ;;
     "default-1") CONFIG_COMMANDS="$CONFIG_COMMANDS default-1" ;;
     "default-2") CONFIG_COMMANDS="$CONFIG_COMMANDS default-2" ;;
@@ -6661,151 +6804,6 @@ if test "$no_create" != yes; then
   # Use ||, not &&, to avoid exiting from the if with $? = 1, which
   # would make configure fail if this is the last instruction.
   $ac_cs_success || as_fn_exit 1
-fi
-
-#
-# CONFIG_SUBDIRS section.
-#
-if test "$no_recursion" != yes; then
-
-  # Remove --cache-file, --srcdir, and --disable-option-checking arguments
-  # so they do not pile up.
-  ac_sub_configure_args=
-  ac_prev=
-  eval "set x $ac_configure_args"
-  shift
-  for ac_arg
-  do
-    if test -n "$ac_prev"; then
-      ac_prev=
-      continue
-    fi
-    case $ac_arg in
-    -cache-file | --cache-file | --cache-fil | --cache-fi \
-    | --cache-f | --cache- | --cache | --cach | --cac | --ca | --c)
-      ac_prev=cache_file ;;
-    -cache-file=* | --cache-file=* | --cache-fil=* | --cache-fi=* \
-    | --cache-f=* | --cache-=* | --cache=* | --cach=* | --cac=* | --ca=* \
-    | --c=*)
-      ;;
-    --config-cache | -C)
-      ;;
-    -srcdir | --srcdir | --srcdi | --srcd | --src | --sr)
-      ac_prev=srcdir ;;
-    -srcdir=* | --srcdir=* | --srcdi=* | --srcd=* | --src=* | --sr=*)
-      ;;
-    -prefix | --prefix | --prefi | --pref | --pre | --pr | --p)
-      ac_prev=prefix ;;
-    -prefix=* | --prefix=* | --prefi=* | --pref=* | --pre=* | --pr=* | --p=*)
-      ;;
-    --disable-option-checking)
-      ;;
-    *)
-      case $ac_arg in
-      *\'*) ac_arg=`$as_echo "$ac_arg" | sed "s/'/'\\\\\\\\''/g"` ;;
-      esac
-      as_fn_append ac_sub_configure_args " '$ac_arg'" ;;
-    esac
-  done
-
-  # Always prepend --prefix to ensure using the same prefix
-  # in subdir configurations.
-  ac_arg="--prefix=$prefix"
-  case $ac_arg in
-  *\'*) ac_arg=`$as_echo "$ac_arg" | sed "s/'/'\\\\\\\\''/g"` ;;
-  esac
-  ac_sub_configure_args="'$ac_arg' $ac_sub_configure_args"
-
-  # Pass --silent
-  if test "$silent" = yes; then
-    ac_sub_configure_args="--silent $ac_sub_configure_args"
-  fi
-
-  # Always prepend --disable-option-checking to silence warnings, since
-  # different subdirs can have different --enable and --with options.
-  ac_sub_configure_args="--disable-option-checking $ac_sub_configure_args"
-
-  ac_popdir=`pwd`
-  for ac_dir in : $subdirs; do test "x$ac_dir" = x: && continue
-
-    # Do not complain, so a configure script can configure whichever
-    # parts of a large source tree are present.
-    test -d "$srcdir/$ac_dir" || continue
-
-    ac_msg="=== configuring in $ac_dir (`pwd`/$ac_dir)"
-    $as_echo "$as_me:${as_lineno-$LINENO}: $ac_msg" >&5
-    $as_echo "$ac_msg" >&6
-    as_dir="$ac_dir"; as_fn_mkdir_p
-    ac_builddir=.
-
-case "$ac_dir" in
-.) ac_dir_suffix= ac_top_builddir_sub=. ac_top_build_prefix= ;;
-*)
-  ac_dir_suffix=/`$as_echo "$ac_dir" | sed 's|^\.[\\/]||'`
-  # A ".." for each directory in $ac_dir_suffix.
-  ac_top_builddir_sub=`$as_echo "$ac_dir_suffix" | sed 's|/[^\\/]*|/..|g;s|/||'`
-  case $ac_top_builddir_sub in
-  "") ac_top_builddir_sub=. ac_top_build_prefix= ;;
-  *)  ac_top_build_prefix=$ac_top_builddir_sub/ ;;
-  esac ;;
-esac
-ac_abs_top_builddir=$ac_pwd
-ac_abs_builddir=$ac_pwd$ac_dir_suffix
-# for backward compatibility:
-ac_top_builddir=$ac_top_build_prefix
-
-case $srcdir in
-  .)  # We are building in place.
-    ac_srcdir=.
-    ac_top_srcdir=$ac_top_builddir_sub
-    ac_abs_top_srcdir=$ac_pwd ;;
-  [\\/]* | ?:[\\/]* )  # Absolute name.
-    ac_srcdir=$srcdir$ac_dir_suffix;
-    ac_top_srcdir=$srcdir
-    ac_abs_top_srcdir=$srcdir ;;
-  *) # Relative name.
-    ac_srcdir=$ac_top_build_prefix$srcdir$ac_dir_suffix
-    ac_top_srcdir=$ac_top_build_prefix$srcdir
-    ac_abs_top_srcdir=$ac_pwd/$srcdir ;;
-esac
-ac_abs_srcdir=$ac_abs_top_srcdir$ac_dir_suffix
-
-
-    cd "$ac_dir"
-
-    # Check for guested configure; otherwise get Cygnus style configure.
-    if test -f "$ac_srcdir/configure.gnu"; then
-      ac_sub_configure=$ac_srcdir/configure.gnu
-    elif test -f "$ac_srcdir/configure"; then
-      ac_sub_configure=$ac_srcdir/configure
-    elif test -f "$ac_srcdir/configure.in"; then
-      # This should be Cygnus configure.
-      ac_sub_configure=$ac_aux_dir/configure
-    else
-      { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: no configuration information is in $ac_dir" >&5
-$as_echo "$as_me: WARNING: no configuration information is in $ac_dir" >&2;}
-      ac_sub_configure=
-    fi
-
-    # The recursion is here.
-    if test -n "$ac_sub_configure"; then
-      # Make the cache file name correct relative to the subdirectory.
-      case $cache_file in
-      [\\/]* | ?:[\\/]* ) ac_sub_cache_file=$cache_file ;;
-      *) # Relative name.
-	ac_sub_cache_file=$ac_top_build_prefix$cache_file ;;
-      esac
-
-      { $as_echo "$as_me:${as_lineno-$LINENO}: running $SHELL $ac_sub_configure $ac_sub_configure_args --cache-file=$ac_sub_cache_file --srcdir=$ac_srcdir" >&5
-$as_echo "$as_me: running $SHELL $ac_sub_configure $ac_sub_configure_args --cache-file=$ac_sub_cache_file --srcdir=$ac_srcdir" >&6;}
-      # The eval makes quoting arguments work.
-      eval "\$SHELL \"\$ac_sub_configure\" $ac_sub_configure_args \
-	   --cache-file=\"\$ac_sub_cache_file\" --srcdir=\"\$ac_srcdir\"" ||
-	as_fn_error $? "$ac_sub_configure failed for $ac_dir" "$LINENO" 5
-    fi
-
-    cd "$ac_popdir"
-  done
 fi
 if test -n "$ac_unrecognized_opts" && test "$enable_option_checking" != no; then
   { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: unrecognized options: $ac_unrecognized_opts" >&5

@@ -15,21 +15,20 @@ $(LIBM_CHEWOUT_FILES): $(MKDOC)
 	$(AM_V_at)touch $@
 %D%/targetdep.tex: %D%/targetdep.tex.stamp; @true
 
-%D%/libm.xml.stamp: %D%/libm.in.xml $(LIBM_CHAPTERS) $(LIBM_DOCBOOK_OUT_FILES)
+%D%/libm.xml: %D%/libm.in.xml $(LIBM_CHAPTERS) $(LIBM_DOCBOOK_OUT_FILES)
 	$(AM_V_at)\
 	for chapter in $(LIBM_CHAPTERS); do \
 	  $(TEXI2DOCBOOK) < $(srcdir)/$$chapter > %D%/`basename $${chapter%.tex}`.xml || exit 1; \
 	done
 	$(AM_V_GEN)xsltproc --xinclude --path $(builddir)/%D% --nonet $(srcdir)/refcontainers.xslt $< > $@.tmp
-	$(AM_V_at)$(SHELL) $(newlib_basedir)/../move-if-change $@.tmp $(@:.stamp=)
+	$(AM_V_at)$(SHELL) $(newlib_basedir)/../move-if-change $@.tmp $@
+
+%C%_man.stamp: %D%/libm.xml
+	$(AM_V_GEN)xmlto --skip-validation -o %D% --searchpath $(builddir)/%D% man -m $(srcdir)/man.xsl $(XMLTO_MAN_QUIET) %D%/libm.xml
 	$(AM_V_at)touch $@
-%D%/libm.xml: %D%/libm.xml.stamp; @true
+man: %C%_man.stamp
 
-%C%_man: %D%/libm.xml
-	$(AM_V_GEN)xmlto --skip-validation -o %D% --searchpath $(builddir)/%D% man -m $(srcdir)/man.xsl %D%/libm.xml
-man: %C%_man
-
-%C%_install-man: %C%_man
+%C%_install-man: %C%_man.stamp
 	$(MKDIR_P) $(DESTDIR)$(mandir)/man3
 	$(INSTALL_DATA) %D%/*.3 $(DESTDIR)$(mandir)/man3/
 install-man: %C%_install-man
@@ -51,6 +50,9 @@ include %D%/test/Makefile.inc
 
 if HAVE_LIBM_MACHINE_AARCH64
 include %D%/machine/aarch64/Makefile.inc
+endif
+if HAVE_LIBM_MACHINE_AMDGCN
+include %D%/machine/amdgcn/Makefile.inc
 endif
 if HAVE_LIBM_MACHINE_ARM
 include %D%/machine/arm/Makefile.inc
@@ -88,4 +90,4 @@ CLEANFILES += \
 	%D%/targetdep.tex.stamp \
 	$(LIBM_CHEWOUT_FILES) \
 	$(LIBM_DOCBOOK_OUT_FILES) \
-	%D%/*.xml %D%/*.xml.stamp %D%/*.3
+	%D%/*.xml %C%_man.stamp %D%/*.3

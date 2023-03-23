@@ -112,6 +112,127 @@ transform_chars_af_unix (PWCHAR out, const char *path, __socklen_t len)
   return out;
 }
 
+/* convert wint_t string to wchar_t string.  Make sure dest
+   has room for at least twice as much characters to account
+   for surrogate pairs, plus a wchar_t NUL. */
+extern "C" void
+wcintowcs (wchar_t *dest, wint_t *src, size_t len)
+{
+  while (*src && len-- > 0)
+    if (*src > 0xffff)
+      {
+	*dest++ = ((*src - 0x10000) >> 10) + 0xd800;
+	*dest++ = ((*src++ - 0x10000) & 0x3ff) + 0xdc00;
+      }
+    else
+	*dest++ = *src++;
+  *dest = '\0';
+}
+
+/* replacement function for wcrtomb, converting a UTF-32 char to a
+   multibyte string. */
+extern "C" size_t
+wirtomb (char *s, wint_t wi, mbstate_t *ps)
+{
+    wchar_t wc[3] = { (wchar_t) wi, '\0', '\0' };
+    const wchar_t *wcp = wc;
+    size_t nwc = 1;
+
+    if (wi >= 0x10000)
+      {
+	wi -= 0x10000;
+	wc[0] = (wi >> 10) + 0xd800;
+	wc[1] = (wi & 0x3ff) + 0xdc00;
+	nwc = 2;
+      }
+    return wcsnrtombs (s, &wcp, nwc, SIZE_MAX, ps);
+}
+
+/* replacement function for mbrtowc, returning a wint_t representing
+   a UTF-32 value. */
+extern "C" size_t
+mbrtowi (wint_t *pwi, const char *s, size_t n, mbstate_t *ps)
+{
+  size_t len, len2;
+  wchar_t w1, w2;
+
+  len = mbrtowc (&w1, s, n, ps);
+  if (len == (size_t) -1 || len == (size_t) -2)
+    return len;
+  *pwi = w1;
+  /* Convert surrogate pair to wint_t value */
+  if (len > 0 && w1 >= 0xd800 && w1 <= 0xdbff)
+    {
+      s += len;
+      n -= len;
+      len2 = mbrtowc (&w2, s, n, ps);
+      if (len2 > 0 && w2 >= 0xdc00 && w2 <= 0xdfff)
+	{
+	  len += len2;
+	  *pwi = (((w1 & 0x3ff) << 10) | (w2 & 0x3ff)) + 0x10000;
+	}
+      else
+	{
+	  len = (size_t) -1;
+	  errno = EILSEQ;
+	}
+    }
+  return len;
+}
+
+extern "C" size_t
+mbsnrtowci(wint_t *dst, const char **src, size_t nms, size_t len, mbstate_t *ps)
+{
+  wint_t *ptr = dst;
+  const char *tmp_src;
+  size_t max;
+  size_t count = 0;
+  size_t bytes;
+
+  if (dst == NULL)
+    {
+      /* Ignore original len value and do not alter src pointer if the
+         dst pointer is NULL.  */
+      len = (size_t)-1;
+      tmp_src = *src;
+      src = &tmp_src;
+    }
+  max = len;
+  while (len > 0)
+    {
+      bytes = mbrtowi (ptr, *src, MB_CUR_MAX, ps);
+      if (bytes > 0)
+        {
+          *src += bytes;
+          nms -= bytes;
+          ++count;
+          ptr = (dst == NULL) ? NULL : ptr + 1;
+          --len;
+        }
+      else if (bytes == 0)
+        {
+          *src = NULL;
+          return count;
+        }
+      else
+        {
+	  /* Deviation from standard: If the input is broken, the output
+	     will be broken.  I. e., we just copy the current byte over
+	     into the wint_t destination and try to pick up on the next
+	     byte.  This is in line with the way fnmatch works. */
+          ps->__count = 0;
+          if (dst)
+	    {
+	      *ptr++ = (const wint_t) *(*src)++;
+	      ++count;
+	      --nms;
+	      --len;
+	    }
+        }
+    }
+  return (size_t) max;
+}
+
 /* The SJIS, JIS and eucJP conversion in newlib does not use UTF as
    wchar_t character representation.  That's unfortunate for us since
    we require UTF for the OS.  What we do here is to have our own
@@ -124,7 +245,8 @@ transform_chars_af_unix (PWCHAR out, const char *path, __socklen_t len)
    eucJP, the both most used Japanese charset encodings, this shouldn't
    be such a big problem. */
 
-/* GBK, eucKR, and Big5 conversions are not available so far in newlib. */
+/* GBK, GB18030, eucKR, and Big5 conversions are not available so far
+   in newlib. */
 
 static int
 __db_wctomb (struct _reent *r, char *s, wchar_t wchar, UINT cp)
@@ -144,7 +266,7 @@ __db_wctomb (struct _reent *r, char *s, wchar_t wchar, UINT cp)
   if (ret > 0 && !def_used)
     return ret;
 
-  r->_errno = EILSEQ;
+  _REENT_ERRNO(r) = EILSEQ;
   return -1;
 }
 
@@ -194,7 +316,7 @@ __eucjp_wctomb (struct _reent *r, char *s, wchar_t wchar, mbstate_t *state)
       return ret;
     }
 
-  r->_errno = EILSEQ;
+  _REENT_ERRNO(r) = EILSEQ;
   return -1;
 }
 
@@ -202,6 +324,12 @@ extern "C" int
 __gbk_wctomb (struct _reent *r, char *s, wchar_t wchar, mbstate_t *state)
 {
   return __db_wctomb (r,s, wchar, 936);
+}
+
+extern "C" int
+__gb18030_wctomb (struct _reent *r, char *s, wchar_t wchar, mbstate_t *state)
+{
+  return __db_wctomb (r,s, wchar, 54936);
 }
 
 extern "C" int
@@ -255,7 +383,7 @@ __db_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n, UINT cp,
 	 here is to check if the first byte returns a valid value... */
       else if (MultiByteToWideChar (cp, MB_ERR_INVALID_CHARS, s, 1, pwc, 1))
 	return 1;
-      r->_errno = EILSEQ;
+      _REENT_ERRNO(r) = EILSEQ;
       return -1;
     }
   state->__value.__wchb[state->__count] = *s;
@@ -263,7 +391,7 @@ __db_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n, UINT cp,
 			     (const char *) state->__value.__wchb, 2, pwc, 1);
   if (!ret)
     {
-      r->_errno = EILSEQ;
+      _REENT_ERRNO(r) = EILSEQ;
       return -1;
     }
   state->__count = 0;
@@ -324,7 +452,7 @@ __eucjp_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
 	}
       else if (MultiByteToWideChar (20932, MB_ERR_INVALID_CHARS, s, 1, pwc, 1))
 	return 1;
-      r->_errno = EILSEQ;
+      _REENT_ERRNO(r) = EILSEQ;
       return -1;
     }
   state->__value.__wchb[state->__count++] = *s;
@@ -347,7 +475,7 @@ jis_x_0212:
   if (!MultiByteToWideChar (20932, MB_ERR_INVALID_CHARS,
 			    (const char *) state->__value.__wchb, 2, pwc, 1))
     {
-      r->_errno = EILSEQ;
+      _REENT_ERRNO(r) = EILSEQ;
       return -1;
     }
   state->__count = 0;
@@ -359,6 +487,13 @@ __gbk_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
 	      mbstate_t *state)
 {
   return __db_mbtowc (r, pwc, s, n, 936, state);
+}
+
+extern "C" int
+__gb18030_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
+		  mbstate_t *state)
+{
+  return __db_mbtowc (r, pwc, s, n, 54936, state);
 }
 
 extern "C" int
@@ -671,7 +806,7 @@ sys_mbstowcs_alloc (wchar_t **dst_p, int type, const char *src, size_t nms)
 /* Copy string, until c or <nul> is encountered.
    NUL-terminate the destination string (s1).
    Return pointer to terminating byte in dst string.  */
-char * __stdcall
+char *
 strccpy (char *__restrict s1, const char **__restrict s2, char c)
 {
   while (**s2 && **s2 != c)
@@ -738,7 +873,7 @@ const char isalpha_array[] = {
    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
 };
 
-extern "C" int __stdcall
+extern "C" int
 cygwin_wcscasecmp (const wchar_t *ws, const wchar_t *wt)
 {
   UNICODE_STRING us, ut;
@@ -748,7 +883,7 @@ cygwin_wcscasecmp (const wchar_t *ws, const wchar_t *wt)
   return RtlCompareUnicodeString (&us, &ut, TRUE);
 }
 
-extern "C" int __stdcall
+extern "C" int
 cygwin_wcsncasecmp (const wchar_t  *ws, const wchar_t *wt, size_t n)
 {
   UNICODE_STRING us, ut;
@@ -763,7 +898,7 @@ cygwin_wcsncasecmp (const wchar_t  *ws, const wchar_t *wt, size_t n)
   return RtlCompareUnicodeString (&us, &ut, TRUE);
 }
 
-extern "C" int __stdcall
+extern "C" int
 cygwin_strcasecmp (const char *cs, const char *ct)
 {
   UNICODE_STRING us, ut;
@@ -782,7 +917,7 @@ cygwin_strcasecmp (const char *cs, const char *ct)
   return RtlCompareUnicodeString (&us, &ut, TRUE);
 }
 
-extern "C" int __stdcall
+extern "C" int
 cygwin_strncasecmp (const char *cs, const char *ct, size_t n)
 {
   UNICODE_STRING us, ut;
@@ -882,7 +1017,7 @@ slashify (const char *src, char *dst, bool trailing_slash_p)
 
 static WCHAR hex_wchars[] = L"0123456789abcdef";
 
-NTSTATUS NTAPI
+NTSTATUS
 RtlInt64ToHexUnicodeString (ULONGLONG value, PUNICODE_STRING dest,
 			    BOOLEAN append)
 {

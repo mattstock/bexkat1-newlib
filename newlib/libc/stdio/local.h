@@ -182,7 +182,6 @@ extern int    __stextmode (int);
 extern void   __sinit (struct _reent *);
 extern void   __smakebuf_r (struct _reent *, FILE *);
 extern int    __swhatbuf_r (struct _reent *, FILE *, size_t *, int *);
-extern int    _fwalk_reent (struct _reent *, int (*)(struct _reent *, FILE *));
 extern int __submore (struct _reent *, FILE *);
 
 #ifdef __LARGE64_FILES
@@ -194,31 +193,15 @@ extern _READ_WRITE_RETURN_TYPE __swrite64 (struct _reent *, void *,
 
 /* Called by the main entry point fns to ensure stdio has been initialized.  */
 
-#if defined(_REENT_SMALL) && !defined(_REENT_GLOBAL_STDIO_STREAMS)
 #define CHECK_INIT(ptr, fp) \
   do								\
     {								\
       struct _reent *_check_init_ptr = (ptr);			\
-      if ((_check_init_ptr) && !(_check_init_ptr)->__cleanup)	\
-	__sinit (_check_init_ptr);				\
-      if ((fp) == (FILE *)&__sf_fake_stdin)			\
-	(fp) = _stdin_r(_check_init_ptr);			\
-      else if ((fp) == (FILE *)&__sf_fake_stdout)		\
-	(fp) = _stdout_r(_check_init_ptr);			\
-      else if ((fp) == (FILE *)&__sf_fake_stderr)		\
-	(fp) = _stderr_r(_check_init_ptr);			\
-    }								\
-  while (0)
-#else /* !_REENT_SMALL || _REENT_GLOBAL_STDIO_STREAMS */
-#define CHECK_INIT(ptr, fp) \
-  do								\
-    {								\
-      struct _reent *_check_init_ptr = (ptr);			\
-      if ((_check_init_ptr) && !(_check_init_ptr)->__cleanup)	\
+      if (!_REENT_IS_NULL(_check_init_ptr) &&			\
+	  !_REENT_CLEANUP(_check_init_ptr))			\
 	__sinit (_check_init_ptr);				\
     }								\
   while (0)
-#endif /* !_REENT_SMALL || _REENT_GLOBAL_STDIO_STREAMS */
 
 /* Return true and set errno and stream error flag iff the given FILE
    cannot be written now.  */
@@ -287,8 +270,6 @@ char *_llicvt (char *, long long, char);
 #else
 void __sfp_lock_acquire (void);
 void __sfp_lock_release (void);
-void __sinit_lock_acquire (void);
-void __sinit_lock_release (void);
 #endif
 
 /* Types used in positional argument support in vfprinf/vfwprintf.

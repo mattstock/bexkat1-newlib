@@ -37,7 +37,7 @@ add_timeval (struct timeval *tv1, struct timeval *tv2)
 }
 
 /* add rusage values of r2 to r1 */
-void __stdcall
+void
 add_rusage (struct rusage *r1, struct rusage *r2)
 {
   add_timeval (&r1->ru_utime, &r2->ru_utime);
@@ -59,7 +59,7 @@ add_rusage (struct rusage *r1, struct rusage *r2)
 }
 
 /* FIXME: what about other fields? */
-void __stdcall
+void
 fill_rusage (struct rusage *r, HANDLE h)
 {
   KERNEL_USER_TIMES kut;
@@ -218,8 +218,7 @@ __set_rlimit_as (unsigned long new_as_limit)
 
   /* If we already have a limit, we must not change it because that
      would potentially influence already running child processes.
-     Just try to create another, nested job.  On systems prior to
-     Windows 8 / Server 2012 this will fail, but that's ok. */
+     Just try to create another, nested job. */
   while (new_as_id == 0)
     new_as_id = InterlockedIncrement (&job_serial_number);
   RtlInitUnicodeString (&uname,

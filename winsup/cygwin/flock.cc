@@ -642,7 +642,7 @@ lockf_t::create_lock_obj_attr (lockfattr_t *attr, ULONG flags, void *sd_buf)
   return &attr->attr;
 }
 
-DWORD WINAPI
+DWORD
 create_lock_in_parent (PVOID param)
 {
   HANDLE lf_obj;
@@ -721,7 +721,7 @@ err:
   return 1;
 }
 
-DWORD WINAPI
+DWORD
 delete_lock_in_parent (PVOID param)
 {
   inode_t *node, *next_node;
@@ -951,10 +951,8 @@ fhandler_base::lock (int a_op, struct flock *fl)
     a_flags = F_POSIX; /* default */
 
   /* FIXME: For BSD flock(2) we need a valid, per file table entry OS handle.
-     Therefore we can't allow using flock(2) on nohandle devices and
-     pre-Windows 8 console handles (recognized by their odd handle value). */
-  if ((a_flags & F_FLOCK)
-      && (nohandle () || (((uintptr_t) get_handle () & 0x3) == 0x3)))
+     Therefore we can't allow using flock(2) on nohandle devices. */
+  if ((a_flags & F_FLOCK) && nohandle ())
     {
       set_errno (EINVAL);
       debug_printf ("BSD locking on nohandle and old-style console devices "
@@ -1870,7 +1868,7 @@ struct lock_parms {
   NTSTATUS	   status;
 };
 
-static DWORD WINAPI
+static DWORD
 blocking_lock_thr (LPVOID param)
 {
   struct lock_parms *lp = (struct lock_parms *) param;

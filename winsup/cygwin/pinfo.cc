@@ -55,10 +55,11 @@ void
 pinfo::thisproc (HANDLE h)
 {
   procinfo = NULL;
+  bool execed = !!h;
 
   DWORD flags = PID_IN_USE | PID_ACTIVE;
   /* Forked process or process started from non-Cygwin parent needs a pid. */
-  if (!h)
+  if (!execed)
     {
       cygheap->pid = create_cygwin_pid ();
       flags |= PID_NEW;
@@ -72,7 +73,8 @@ pinfo::thisproc (HANDLE h)
   procinfo->dwProcessId = myself_initial.dwProcessId;
   procinfo->sendsig = myself_initial.sendsig;
   wcscpy (procinfo->progname, myself_initial.progname);
-  create_winpid_symlink ();
+  if (!execed)
+    create_winpid_symlink ();
   procinfo->exec_sendsig = NULL;
   procinfo->exec_dwProcessId = 0;
   debug_printf ("myself dwProcessId %u", procinfo->dwProcessId);
@@ -80,7 +82,7 @@ pinfo::thisproc (HANDLE h)
 
 /* Initialize the process table entry for the current task.
    This is not called for forked tasks, only execed ones.  */
-void __stdcall
+void
 pinfo_init (char **envp, int envc)
 {
   if (envp)
@@ -95,7 +97,7 @@ pinfo_init (char **envp, int envc)
 
       myself.thisproc (NULL);
       myself->pgid = myself->sid = myself->pid;
-      myself->ctty = -1;
+      myself->ctty = CTTY_UNINITIALIZED;
       myself->uid = ILLEGAL_UID;
       myself->gid = ILLEGAL_GID;
       environ_init (NULL, 0);	/* call after myself has been set up */
@@ -210,7 +212,7 @@ pinfo::exit (DWORD n)
     maybe_set_exit_code_from_windows ();	/* may block */
   exit_state = ES_FINAL;
 
-  if (myself->ctty > 0 && !iscons_dev (myself->ctty))
+  if (CTTY_IS_VALID (myself->ctty) && !iscons_dev (myself->ctty))
     {
       lock_ttys here;
       tty *t = cygwin_shared->tty[device::minor(myself->ctty)];
@@ -385,8 +387,10 @@ pinfo::init (pid_t n, DWORD flag, HANDLE h0)
 
   for (int i = 0; i < 20; i++)
     {
+      bool created;
+
       procinfo = (_pinfo *) open_shared (L"cygpid", n, h0, sizeof (_pinfo),
-					 &shloc, sec_attribs, access);
+					 shloc, created, sec_attribs, access);
       if (!h0)
 	{
 	  if (createit)
@@ -406,8 +410,6 @@ pinfo::init (pid_t n, DWORD flag, HANDLE h0)
 	  yield ();
 	  continue;
 	}
-
-      bool created = shloc != SH_JUSTOPEN;
 
       /* Just fetching info for ps or /proc, don't do anything rash. */
       if (!created && !(flag & PID_NEW) && !procinfo->ppid
@@ -464,6 +466,8 @@ pinfo::init (pid_t n, DWORD flag, HANDLE h0)
       h = h0;
       _pinfo_release ();
     }
+  if (shloc == SH_MYSELF)
+    cygheap->shared_regions.myself_shared_addr = procinfo;
 }
 
 void
@@ -510,7 +514,7 @@ pinfo::pinfo (HANDLE parent, pinfo_minimal& from, pid_t pid):
 const char *
 _pinfo::_ctty (char *buf)
 {
-  if (ctty <= 0)
+  if (!CTTY_IS_VALID (ctty))
     strcpy (buf, "no ctty");
   else
     {
@@ -526,26 +530,32 @@ _pinfo::set_ctty (fhandler_termios *fh, int flags)
 {
   tty_min& tc = *fh->tc ();
   debug_printf ("old %s, ctty device number %y, tc.ntty device number %y flags & O_NOCTTY %y", __ctty (), ctty, tc.ntty, flags & O_NOCTTY);
-  if (fh && (ctty <= 0 || ctty == tc.ntty) && !(flags & O_NOCTTY))
+  if (fh && (!CTTY_IS_VALID (ctty) || ctty == tc.ntty) && !(flags & O_NOCTTY))
     {
-      ctty = tc.ntty;
-      if (cygheap->ctty != fh->archetype)
+      if (tc.getsid () && tc.getsid () != sid && ctty == CTTY_RELEASED)
+	; /* Do nothing if another session is associated with the TTY. */
+      else
 	{
-	  debug_printf ("cygheap->ctty %p, archetype %p", cygheap->ctty, fh->archetype);
-	  if (!cygheap->ctty)
-	    syscall_printf ("ctty was NULL");
-	  else
+	  ctty = tc.ntty;
+	  if (cygheap->ctty != fh->archetype)
 	    {
-	      syscall_printf ("ctty %p, usecount %d", cygheap->ctty,
-			      cygheap->ctty->archetype_usecount (0));
-	      cygheap->ctty->close ();
-	    }
-	  cygheap->ctty = (fhandler_termios *) fh->archetype;
-	  if (cygheap->ctty)
-	    {
-	      fh->archetype_usecount (1);
-	      /* guard ctty fh */
-	      report_tty_counts (cygheap->ctty, "ctty", "");
+	      debug_printf ("cygheap->ctty %p, archetype %p",
+			    cygheap->ctty, fh->archetype);
+	      if (!cygheap->ctty)
+		syscall_printf ("ctty was NULL");
+	      else
+		{
+		  syscall_printf ("ctty %p, usecount %d", cygheap->ctty,
+				  cygheap->ctty->archetype_usecount (0));
+		  cygheap->ctty->close ();
+		}
+	      cygheap->ctty = (fhandler_termios *) fh->archetype;
+	      if (cygheap->ctty)
+		{
+		  fh->archetype_usecount (1);
+		  /* guard ctty fh */
+		  report_tty_counts (cygheap->ctty, "ctty", "");
+		}
 	    }
 	}
 
@@ -568,18 +578,19 @@ _pinfo::set_ctty (fhandler_termios *fh, int flags)
 	 an obvious bug surfaces. */
       if (sid == pid && !tc.getsid ())
 	tc.setsid (sid);
-      sid = tc.getsid ();
+      if (CTTY_IS_VALID (ctty))
+	sid = tc.getsid ();
       /* See above */
       if ((!tc.getpgid () || being_debugged ()) && pgid == pid)
 	tc.setpgid (pgid);
     }
   debug_printf ("cygheap->ctty now %p, archetype %p", cygheap->ctty, fh ? fh->archetype : NULL);
-  return ctty > 0;
+  return CTTY_IS_VALID (ctty);
 }
 
 /* Test to determine if a process really exists and is processing signals.
  */
-bool __reg1
+bool
 _pinfo::exists ()
 {
   return process_state && !(process_state & (PID_EXITED | PID_REAPED));
@@ -595,7 +606,20 @@ _pinfo::alive ()
   return !!h;
 }
 
-DWORD WINAPI
+static commune_result
+commune_process_siginfo ()
+{
+  commune_result res = { 0 };
+
+  res.pnd = sig_send (myself, __SIGPENDINGALL, NULL);
+  res.blk = cygheap->compute_sigblkmask ();
+  for (int sig = 1; sig < NSIG; ++sig)
+    if (global_sigs[sig].sa_handler == SIG_IGN)
+      res.ign |= SIGTOMASK (sig);
+  return res;
+}
+
+DWORD
 commune_process (void *arg)
 {
   siginfo_t& si = *((siginfo_t *) arg);
@@ -671,13 +695,7 @@ commune_process (void *arg)
     case PICOM_SIGINFO:
       {
 	sigproc_printf ("processing PICOM_SIGINFO");
-	commune_result cr;
-	sigpending (&cr.pnd);
-	cr.pnd = sig_send (myself, __SIGPENDINGALL, NULL);
-	cr.blk = cygheap->compute_sigblkmask ();
-	for (int sig = 1; sig < NSIG; ++sig)
-	  if (global_sigs[sig].sa_handler == SIG_IGN)
-	    cr.ign |= SIGTOMASK (sig);
+	commune_result cr = commune_process_siginfo ();
 	if (!WritePipeOverlapped (tothem, &cr, sizeof cr, &nr, 1000L))
 	  sigproc_printf ("WritePipeOverlapped siginfo failed, %E");
 	break;
@@ -767,7 +785,7 @@ commune_process (void *arg)
       {
 	sigproc_printf ("processing PICOM_ENVIRON");
 	unsigned n = 0;
-	char **env = cur_environ ();
+	char **env = environ;
 	if (env)
 	  for (char **e = env; *e; e++)
 	    n += strlen (*e) + 1;
@@ -1018,24 +1036,17 @@ _pinfo::root (size_t& n)
 int
 _pinfo::siginfo (sigset_t &pnd, sigset_t &blk, sigset_t &ign)
 {
+  commune_result cr;
+
   if (!pid)
     return -1;
   if (pid != myself->pid && !ISSTATE (this, PID_NOTCYGWIN))
-    {
-      commune_result cr = commune_request (PICOM_SIGINFO);
-      pnd = cr.pnd;
-      blk = cr.blk;
-      ign = cr.ign;
-    }
+    cr = commune_request (PICOM_SIGINFO);
   else
-    {
-      pnd = sig_send (myself, __SIGPENDINGALL, NULL);
-      blk = cygheap->compute_sigblkmask ();
-      ign = 0;
-      for (int sig = 1; sig < NSIG; ++sig)
-	if (global_sigs[sig].sa_handler == SIG_IGN)
-	  ign |= SIGTOMASK (sig);
-    }
+    cr = commune_process_siginfo ();
+  pnd = cr.pnd;
+  blk = cr.blk;
+  ign = cr.ign;
   return -1;
 }
 
@@ -1208,7 +1219,7 @@ _pinfo::environ (size_t& n)
       return cr.s;
     }
   else
-    env = cur_environ ();
+    env = ::environ;
 
   if (env == NULL)
     return NULL;
@@ -1232,7 +1243,7 @@ _pinfo::environ (size_t& n)
    is received on the pipe, it is assumed that the cygwin pid has exited.
    Otherwise, various "signals" can be sent to the parent to inform the
    parent to perform a certain action. */
-static DWORD WINAPI
+static DWORD
 proc_waiter (void *arg)
 {
   pinfo vchild = *(pinfo *) arg;

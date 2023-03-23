@@ -770,7 +770,7 @@ out:
 
 static int start_thread_pipe (select_record *me, select_stuff *stuff);
 
-static DWORD WINAPI
+static DWORD
 thread_pipe (void *arg)
 {
   select_pipe_info *pi = (select_pipe_info *) arg;
@@ -950,7 +950,17 @@ peek_fifo (select_record *s, bool from_select)
 	    }
 	}
       fh->fifo_client_unlock ();
-      if (!nconnected && fh->hit_eof ())
+      /* According to POSIX and the Linux man page, we're supposed to
+	 report read ready if the FIFO is at EOF, i.e., if the pipe is
+	 empty and there are no writers.  But there seems to be an
+	 undocumented exception, observed on Linux and other platforms
+	 (https://cygwin.com/pipermail/cygwin/2022-September/252223.html):
+	 If no writer has ever been opened, then we do not report read
+	 ready.  This can happen if a reader is opened with O_NONBLOCK
+	 before any writers have opened.  To be consistent with other
+	 platforms, we use a special EOF test that returns false if
+	 there's never been a writer opened. */
+      if (!nconnected && fh->select_hit_eof ())
 	{
 	  select_printf ("read: %s, saw EOF", fh->get_name ());
 	  gotone += s->read_ready = true;
@@ -973,7 +983,7 @@ out:
 
 static int start_thread_fifo (select_record *me, select_stuff *stuff);
 
-static DWORD WINAPI
+static DWORD
 thread_fifo (void *arg)
 {
   select_fifo_info *pi = (select_fifo_info *) arg;
@@ -1125,14 +1135,15 @@ peek_console (select_record *me, bool)
     {
       if (fh->bg_check (SIGTTIN, true) <= bg_eof)
 	{
-	  release_attach_mutex ();
 	  fh->release_input_mutex ();
 	  return me->read_ready = true;
 	}
       else
 	{
 	  acquire_attach_mutex (mutex_timeout);
+	  DWORD resume_pid = fh->attach_console (fh->get_owner ());
 	  BOOL r = PeekConsoleInputW (h, &irec, 1, &events_read);
+	  fh->detach_console (resume_pid, fh->get_owner ());
 	  release_attach_mutex ();
 	  if (!r || !events_read)
 	    break;
@@ -1142,7 +1153,6 @@ peek_console (select_record *me, bool)
 	  && global_sigs[SIGWINCH].sa_handler != SIG_DFL)
 	{
 	  set_sig_errno (EINTR);
-	  release_attach_mutex ();
 	  fh->release_input_mutex ();
 	  return -1;
 	}
@@ -1163,7 +1173,7 @@ verify_console (select_record *me, fd_set *rfds, fd_set *wfds,
 
 static int console_startup (select_record *me, select_stuff *stuff);
 
-static DWORD WINAPI
+static DWORD
 thread_console (void *arg)
 {
   select_console_info *ci = (select_console_info *) arg;
@@ -1399,7 +1409,7 @@ out:
 
 static int pty_slave_startup (select_record *me, select_stuff *stuff);
 
-static DWORD WINAPI
+static DWORD
 thread_pty_slave (void *arg)
 {
   select_pipe_info *pi = (select_pipe_info *) arg;
@@ -1775,7 +1785,7 @@ peek_socket (select_record *me, bool)
 
 static int start_thread_socket (select_record *, select_stuff *);
 
-static DWORD WINAPI
+static DWORD
 thread_socket (void *arg)
 {
   select_socket_info *si = (select_socket_info *) arg;

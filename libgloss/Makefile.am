@@ -6,10 +6,12 @@ ACLOCAL_AMFLAGS = -I . -I .. -I ../config
 bin_PROGRAMS =
 check_PROGRAMS =
 info_TEXINFOS =
+CLEANFILES =
 PHONY =
 
 SUBDIRS = @subdirs@ .
 
+srcroot = $(top_srcdir)/..
 tooldir = $(exec_prefix)/$(target_alias)
 
 multilibtooldir = $(tooldir)/lib$(MULTISUBDIR)
@@ -21,6 +23,12 @@ includetool_DATA =
 
 includesystooldir = $(tooldir)/include/sys
 includesystool_DATA =
+
+if NEED_TOP_INCLUDE_DIR
+AM_CPPFLAGS = -idirafter $(srcroot)/include
+else
+AM_CPPFLAGS =
+endif
 
 # A fake library so automake will generate rules for plain objects that we want
 # to install (e.g. our crt0.o objects).
@@ -59,8 +67,23 @@ TEXINFO_TEX = ../texinfo/texinfo.tex
 if HAVE_DOC
 include doc/Makefile.inc
 endif
+if CONFIG_AARCH64
+include aarch64/Makefile.inc
+endif
+if CONFIG_ARC
+include arc/Makefile.inc
+endif
+if CONFIG_ARM
+include arm/Makefile.inc
+endif
 if CONFIG_BFIN
 include bfin/Makefile.inc
+endif
+if CONFIG_CSKY
+include csky/Makefile.inc
+endif
+if CONFIG_D30V
+include d30v/Makefile.inc
 endif
 if CONFIG_IQ2000
 include iq2000/Makefile.inc
@@ -70,6 +93,12 @@ include libnosys/Makefile.inc
 endif
 if CONFIG_LM32
 include lm32/Makefile.inc
+endif
+if CONFIG_NIOS2
+include nios2/Makefile.inc
+endif
+if CONFIG_RISCV
+include riscv/Makefile.inc
 endif
 if CONFIG_WINCE
 include wince/Makefile.inc

@@ -65,26 +65,14 @@ no)	 ;;
 esac
 ])
 
+DLL_ENTRY="dll_entry"
+
 case "$target_cpu" in
-   i?86)
-		DLL_ENTRY="_dll_entry@12"
-		DEF_DLL_ENTRY="dll_entry@12"
-		DIN_FILE="i686.din"
-		TLSOFFSETS_H="tlsoffsets.h"
-		;;
-   x86_64)
-		DLL_ENTRY="dll_entry"
-		DEF_DLL_ENTRY="dll_entry"
-		DIN_FILE="x86_64.din"
-		TLSOFFSETS_H="tlsoffsets64.h"
-		;;
+   x86_64)	;;
    *)		AC_MSG_ERROR([Invalid target processor "$target_cpu"]) ;;
 esac
 
 AC_SUBST(DLL_ENTRY)
-AC_SUBST(DEF_DLL_ENTRY)
-AC_SUBST(DIN_FILE)
-AC_SUBST(TLSOFFSETS_H)
 
 AM_CONDITIONAL(TARGET_X86_64, [test $target_cpu = "x86_64"])
 
@@ -123,10 +111,19 @@ AM_CONDITIONAL(CROSS_BOOTSTRAP, [test "x$with_cross_bootstrap" != "xyes"])
 
 AC_EXEEXT
 
-AC_CHECK_LIB([bfd], [bfd_init], [true],
-	     AC_MSG_WARN([Not building dumper.exe since some required libraries or headers are missing]))
+AC_ARG_ENABLE([dumper],
+	      [AS_HELP_STRING([--disable-dumper], [do not build the 'dumper' utility])],
+	      [build_dumper=$enableval],
+	      [build_dumper=yes])
 
-AM_CONDITIONAL(BUILD_DUMPER, [test "x$ac_cv_lib_bfd_bfd_init" = "xyes"])
+AM_CONDITIONAL(BUILD_DUMPER, [test "x$build_dumper" = "xyes"])
+
+# libbfd.a doesn't have a pkgconfig file, so we guess what it's dependencies
+# are, based on what's present in the build environment
+BFD_LIBS="-lintl -liconv -liberty -lz"
+AC_CHECK_LIB([sframe], [sframe_decode], [BFD_LIBS="${BFD_LIBS} -lsframe"])
+AC_CHECK_LIB([zstd], [ZSTD_isError], [BFD_LIBS="${BFD_LIBS} -lzstd"])
+AC_SUBST([BFD_LIBS])
 
 AC_CONFIG_FILES([
     Makefile
@@ -136,7 +133,7 @@ AC_CONFIG_FILES([
     utils/Makefile
     utils/mingw/Makefile
     testsuite/Makefile
-    testsuite/cygrun/Makefile
+    testsuite/mingw/Makefile
 ])
 
 AC_OUTPUT

@@ -39,7 +39,7 @@ __ascii_mbtowc (struct _reent *r,
 #ifdef __CYGWIN__
   if ((wchar_t)*t >= 0x80)
     {
-      r->_errno = EILSEQ;
+      _REENT_ERRNO(r) = EILSEQ;
       return -1;
     }
 #endif
@@ -117,7 +117,7 @@ ___iso_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
 	  *pwc = __iso_8859_conv[iso_idx][*t - 0xa0];
 	  if (*pwc == 0) /* Invalid character */
 	    {
-	      r->_errno = EILSEQ;
+	      _REENT_ERRNO(r) = EILSEQ;
 	      return -1;
 	    }
 	  return 1;
@@ -290,7 +290,7 @@ ___cp_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
 	  *pwc = __cp_conv[cp_idx][*t - 0x80];
 	  if (*pwc == 0) /* Invalid character */
 	    {
-	      r->_errno = EILSEQ;
+	      _REENT_ERRNO(r) = EILSEQ;
 	      return -1;
 	    }
 	  return 1;
@@ -487,7 +487,14 @@ __cp_102_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
   return ___cp_mbtowc (r, pwc, s, n, 25, state);
 }
 
-static mbtowc_p __cp_xxx_mbtowc[26] = {
+static int
+__cp_103_mbtowc (struct _reent *r, wchar_t *pwc, const char *s, size_t n,
+		 mbstate_t *state)
+{
+  return ___cp_mbtowc (r, pwc, s, n, 26, state);
+}
+
+static mbtowc_p __cp_xxx_mbtowc[27] = {
   __cp_437_mbtowc,
   __cp_720_mbtowc,
   __cp_737_mbtowc,
@@ -513,7 +520,8 @@ static mbtowc_p __cp_xxx_mbtowc[26] = {
   __cp_20866_mbtowc,
   __cp_21866_mbtowc,
   __cp_101_mbtowc,
-  __cp_102_mbtowc
+  __cp_102_mbtowc,
+  __cp_103_mbtowc,
 };
 
 /* val *MUST* be valid!  All checks for validity are supposed to be
@@ -578,13 +586,13 @@ __utf8_mbtowc (struct _reent *r,
       ch = t[i++];
       if (ch < 0x80 || ch > 0xbf)
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       if (state->__value.__wchb[0] < 0xc2)
 	{
 	  /* overlong UTF-8 sequence */
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       state->__count = 0;
@@ -607,12 +615,12 @@ __utf8_mbtowc (struct _reent *r,
       if (state->__value.__wchb[0] == 0xe0 && ch < 0xa0)
 	{
 	  /* overlong UTF-8 sequence */
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       if (ch < 0x80 || ch > 0xbf)
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       state->__value.__wchb[1] = ch;
@@ -625,7 +633,7 @@ __utf8_mbtowc (struct _reent *r,
       ch = t[i++];
       if (ch < 0x80 || ch > 0xbf)
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       state->__count = 0;
@@ -651,12 +659,12 @@ __utf8_mbtowc (struct _reent *r,
 	  || (state->__value.__wchb[0] == 0xf4 && ch >= 0x90))
 	{
 	  /* overlong UTF-8 sequence or result is > 0x10ffff */
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       if (ch < 0x80 || ch > 0xbf)
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       state->__value.__wchb[1] = ch;
@@ -669,7 +677,7 @@ __utf8_mbtowc (struct _reent *r,
       ch = (state->__count == 2) ? t[i++] : state->__value.__wchb[2];
       if (ch < 0x80 || ch > 0xbf)
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       state->__value.__wchb[2] = ch;
@@ -702,7 +710,7 @@ __utf8_mbtowc (struct _reent *r,
       ch = t[i++];
       if (ch < 0x80 || ch > 0xbf)
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
       tmp = (wint_t)((state->__value.__wchb[0] & 0x07) << 18)
@@ -719,7 +727,7 @@ __utf8_mbtowc (struct _reent *r,
       return i;
     }
 
-  r->_errno = EILSEQ;
+  _REENT_ERRNO(r) = EILSEQ;
   return -1;
 }
 
@@ -769,7 +777,7 @@ __sjis_mbtowc (struct _reent *r,
 	}
       else  
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
     }
@@ -836,7 +844,7 @@ __eucjp_mbtowc (struct _reent *r,
 	}
       else
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
     }
@@ -851,7 +859,7 @@ __eucjp_mbtowc (struct _reent *r,
 	}
       else
 	{
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
     }
@@ -955,7 +963,7 @@ __jis_mbtowc (struct _reent *r,
 	  break;
 	case ERROR:
 	default:
-	  r->_errno = EILSEQ;
+	  _REENT_ERRNO(r) = EILSEQ;
 	  return -1;
 	}
 

@@ -8,6 +8,18 @@ fi
 
 AC_CONFIG_AUX_DIR(..)
 
+dnl Support --disable-newlib-supplied-syscalls
+dnl NB: This is kept in sync with the newlib/acinclude.m4 option code.
+AC_ARG_ENABLE(newlib-supplied-syscalls,
+[  --disable-newlib-supplied-syscalls disable newlib from supplying syscalls],
+[case "${enableval}" in
+  yes) newlib_may_supply_syscalls=yes ;;
+  no)  newlib_may_supply_syscalls=no ;;
+  *)   AC_MSG_ERROR(bad value ${enableval} for newlib-supplied-syscalls option) ;;
+ esac], [newlib_may_supply_syscalls=yes])dnl
+
+AM_CONDITIONAL(MAY_SUPPLY_SYSCALLS, test x[$]{newlib_may_supply_syscalls} = xyes)
+
 AC_PROG_INSTALL
 
 AC_CANONICAL_SYSTEM
@@ -36,16 +48,14 @@ target_makefile_frag=${srcdir}/config/default.mt
 
 case "${target}" in
   aarch64*-*-*)
-	AC_CONFIG_SUBDIRS(aarch64)
+	config_aarch64=true
 	config_testsuite=true
 	;;
   arc*-*-*)
-	AC_CONFIG_FILES([arc/Makefile])
-	subdirs="$subdirs arc"
+	config_arc=true
 	;;
   csky*-*-*)
-	AC_CONFIG_FILES([csky/Makefile])
-	subdirs="$subdirs csky"
+	config_csky=true
 	;;
   epiphany-*-*)
 	AC_CONFIG_FILES([epiphany/Makefile])
@@ -97,8 +107,7 @@ case "${target}" in
 	target_makefile_frag=${srcdir}/config/mips.mt
 	;;
   riscv*-*-*)
-	AC_CONFIG_FILES([riscv/Makefile])
-	subdirs="$subdirs riscv"
+	config_riscv=true
 	;;
   powerpc-*-*|powerpcle-*-*)
 	AC_CONFIG_FILES([rs6000/Makefile])
@@ -135,8 +144,7 @@ case "${target}" in
 	subdirs="$subdirs crx"
 	;;
   d30v-*-*)
-	AC_CONFIG_FILES([d30v/Makefile])
-	subdirs="$subdirs d30v"
+	config_d30v=true
 	;;
   fr30-*-*)
 	AC_CONFIG_FILES([fr30/Makefile])
@@ -209,7 +217,8 @@ case "${target}" in
 	subdirs="$subdirs rx"
 	;;
   arm*-*-elf | arm*-*-coff | arm*-*-*)
-	AC_CONFIG_SUBDIRS([arm])
+	config_arm=true
+	host_makefile_frag=${srcdir}/config/arm.mh
 	;;
   spu-*-elf)
 	AC_CONFIG_FILES([spu/Makefile])
@@ -235,18 +244,21 @@ case "${target}" in
 	subdirs="$subdirs pru"
 	;;
   nios2-*-*)
-	AC_CONFIG_FILES([nios2/Makefile])
-	subdirs="$subdirs nios2"
+	config_nios2=true
 	;;
 esac
+AC_SUBST(subdirs)
 
 dnl These subdirs have converted to non-recursive make.  Hopefully someday all
 dnl the ports above will too!
 m4_foreach_w([SUBDIR], [
-  bfin iq2000 libnosys lm32 wince
+  aarch64 arc arm bfin csky d30v iq2000 libnosys lm32 nios2 riscv wince
 ], [dnl
   AM_CONDITIONAL([CONFIG_]m4_toupper(SUBDIR), [test x$config_]SUBDIR = xtrue)
 ])
+
+dnl arm platforms have a special header file found in the main include directory
+AM_CONDITIONAL([NEED_TOP_INCLUDE_DIR], [[test x$config_arm] = xtrue])
 
 dnl For now, don't bother configuring testsuite
 dnl
@@ -335,6 +347,8 @@ dnl
   rm -f conftest* ])
 AC_DEFINE_UNQUOTED(__SYMBOL_PREFIX, "$libc_cv_symbol_prefix", [symbol prefix])
 
+m4_include([aarch64/acinclude.m4])
+m4_include([arm/acinclude.m4])
 m4_include([i386/acinclude.m4])
 m4_include([libnosys/acinclude.m4])
 m4_include([m68k/acinclude.m4])

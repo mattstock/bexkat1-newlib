@@ -119,6 +119,7 @@ case "${host_cpu}" in
   amdgcn*)
 	newlib_cflags="${newlib_cflags} -D__DYNAMIC_REENT__"
 	machine_dir=amdgcn
+	libm_machine_dir=amdgcn
 	newlib_cv_initfinit_array=yes
 	;;
   arc*)
@@ -425,7 +426,6 @@ fi
 case "${host}" in
   *-*-cygwin*)
 	posix_dir=posix
-	stdio64_dir=stdio64
 	xdr_dir=xdr
 	;;
   *-*-netware*)
@@ -637,6 +637,7 @@ newlib_cflags="${newlib_cflags} -DCLOCK_PROVIDED -DMALLOC_PROVIDED -DEXIT_PROVID
 	;;
   arm*-*-pe)
 	syscall_dir=syscalls
+	newlib_cflags="${newlib_cflags} -DHAVE_SYSCONF_PAGESIZE"
 	;;
   arm*-*-*)
 	syscall_dir=syscalls
@@ -651,6 +652,7 @@ newlib_cflags="${newlib_cflags} -DCLOCK_PROVIDED -DMALLOC_PROVIDED -DEXIT_PROVID
 #         newlib_cflags="${newlib_cflags} -DARM_RDP_MONITOR"
 	  newlib_cflags="${newlib_cflags} -DARM_RDI_MONITOR"
 	fi
+	newlib_cflags="${newlib_cflags} -DHAVE_SYSCONF_PAGESIZE"
 	;;
   avr*)
 	newlib_cflags="${newlib_cflags} -DNO_EXEC -DSMALL_MEMORY -DMISSING_SYSCALL_NAMES"
@@ -949,11 +951,6 @@ fi
 # Target-specific defaults
 case "${host_cpu}" in
   nvptx*)
-	if [ "x${newlib_elix_level}" = "x0" ]; then
-		newlib_elix_level=1;
-	elif [ "x${newlib_elix_level}" != "x1" ]; then
-		newlib_msg_warn="nvptx does not support elix level > 1";
-	fi
 	if [[ -z ${newlib_global_stdio_streams} ]]; then
 		newlib_global_stdio_streams="yes";
 	fi

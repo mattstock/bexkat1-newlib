@@ -36,6 +36,7 @@
 #include <string.h>
 #include <errno.h>
 #include <malloc.h>
+#include <stdint.h>
 
 #if DEBUG
 #include <assert.h>
@@ -327,14 +328,28 @@ void * nano_malloc(RARG malloc_size_t s)
                /* The last free item has the heap end as neighbour.
                 * Let's ask for a smaller amount and merge */
                alloc_size -= p->size;
-               alloc_size = ALIGN_SIZE(alloc_size, CHUNK_ALIGN); /* size of aligned data load */
-               alloc_size += MALLOC_PADDING; /* padding */
-               alloc_size += CHUNK_OFFSET; /* size of chunk head */
-               alloc_size = MAX(alloc_size, MALLOC_MINCHUNK);
 
                if (sbrk_aligned(RCALL alloc_size) != (void *)-1)
                {
                    p->size += alloc_size;
+
+                   /* Remove chunk from free_list. Since p != NULL there is
+                      at least one chunk */
+                   r = free_list;
+                   if (r->next == NULL)
+                   {
+                       /* There is only a single chunk, remove it */
+                       free_list = NULL;
+                   }
+                   else
+                   {
+                       /* Search for the chunk before the one to be removed */
+                       while (p != r->next)
+                       {
+                           r = r->next;
+                       }
+                       r->next = NULL;
+                   }
                    r = p;
                }
                else

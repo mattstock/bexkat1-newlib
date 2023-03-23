@@ -58,12 +58,12 @@ revoke (char *ttyname)
 extern "C" int
 ttyslot (void)
 {
-  if (myself->ctty <= 0 || iscons_dev (myself->ctty))
+  if (!CTTY_IS_VALID (myself->ctty) || iscons_dev (myself->ctty))
     return -1;
   return device::minor (myself->ctty);
 }
 
-void __stdcall
+void
 tty_list::init_session ()
 {
   char mutex_name[MAX_PATH];
@@ -75,14 +75,14 @@ tty_list::init_session ()
   ProtectHandle (mutex);
 }
 
-void __stdcall
+void
 tty::init_session ()
 {
   if (!myself->cygstarted && NOTSTATE (myself, PID_CYGPARENT))
     cygheap->fdtab.get_debugger_info ();
 }
 
-int __reg2
+int
 tty_list::attach (int n)
 {
   int res;
@@ -319,13 +319,13 @@ tty::wait_fwd ()
      16-32 msec even if it already has data to transfer.
      If the time without transfer exceeds 32 msec, the
      forwarding is supposed to be finished. fwd_last_time
-     is reset to GetTickCount() in pty master forwarding
+     is reset to GetTickCount64() in pty master forwarding
      thread when the last data is transfered. */
-  const int sleep_in_nat_pipe = 16;
-  const int time_to_wait = sleep_in_nat_pipe * 2 + 1/* margine */;
-  int elapsed;
+  const ULONGLONG sleep_in_nat_pipe = 16;
+  const ULONGLONG time_to_wait = sleep_in_nat_pipe * 2 + 1/* margine */;
+  ULONGLONG elapsed;
   while (fwd_not_empty
-	 || (elapsed = GetTickCount () - fwd_last_time) < time_to_wait)
+	 || (elapsed = GetTickCount64 () - fwd_last_time) < time_to_wait)
     {
       int tw = fwd_not_empty ? 10 : (time_to_wait - elapsed);
       cygwait (tw);
