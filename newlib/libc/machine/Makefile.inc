@@ -10,6 +10,9 @@ endif
 if HAVE_LIBC_MACHINE_ARM
 include %D%/arm/Makefile.inc
 endif
+if HAVE_LIBC_MACHINE_BEXKAT1
+include %D%/bexkat1/Makefile.inc
+endif
 if HAVE_LIBC_MACHINE_BFIN
 include %D%/bfin/Makefile.inc
 endif
