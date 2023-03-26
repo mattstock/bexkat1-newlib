@@ -44,6 +44,8 @@ INSTALL_DATA = @INSTALL_DATA@
 
 SHELL = /bin/sh
 
+mkinstalldirs = $(SHELL) $(srcroot)/mkinstalldirs
+
 CC = @CC@
 
 AS = @AS@
@@ -61,10 +63,8 @@ OBJCOPY = `if [ -f ${objroot}/../binutils/objcopy ] ; \
 
 LD_SCRIPTS = bexkat1-elf-common.ld de2.ld de2.specs max10.ld max10.specs mister.ld mister.specs
 
-@BUILD_CRT0_TRUE@CRT0		= crt0.o
-@BUILD_CRT0_TRUE@CRT0_INSTALL	= install-crt0
-@BUILD_CRT0_FALSE@CRT0		= 
-@BUILD_CRT0_FALSE@CRT0_INSTALL	= 
+CRT0		= crt0.o
+CRT0_INSTALL	= install-crt0
 
 DE2_BSP  = libde2.a
 DE2_SCRIPTS = de2.specs
@@ -130,8 +130,5 @@ info doc dvi:
 install-info:
 clean-info:
 
-Makefile: Makefile.in config.status @host_makefile_frag_path@
-	$(SHELL) config.status
-
-config.status: configure
-	$(SHELL) config.status --recheck
+Makefile: Makefile.in ../config.status
+	cd .. && $(SHELL) config.status
