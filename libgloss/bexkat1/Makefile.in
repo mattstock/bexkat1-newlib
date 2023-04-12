@@ -68,15 +68,15 @@ CRT0_INSTALL	= install-crt0
 
 DE2_BSP  = libde2.a
 DE2_SCRIPTS = de2.specs
-DE2_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o de2stack.o
+DE2_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o de2stack.o rtc.o
 
 MAX10_BSP  = libmax10.a
 MAX10_SCRIPTS = max10.specs
-MAX10_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o max10stack.o
+MAX10_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o max10stack.o rtc.o
 
 MISTER_BSP  = libmister.a
 MISTER_SCRIPTS = mister.specs
-MISTER_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o misterstack.o
+MISTER_OBJS = fileio.o getpid.o isatty.o kill.o sbrk.o exit.o gettimeofday.o usleep.o syscalls.o misterstack.o rtc.o
 
 #### Host specific Makefile fragment comes in here.
 @host_makefile_frag@
@@ -101,6 +101,7 @@ isatty.o: $(srcdir)/isatty.c
 kill.o: $(srcdir)/kill.c
 putnum.o: $(srcdir)/putnum.c
 sbrk.o: $(srcdir)/sbrk.c
+rtc.o: $(srcdir)/rtc.c
 fileio.o: $(srcdir)/fileio.c
 syscalls.o: $(srcdir)/syscalls.c
 exit.o: $(srcdir)/exit.S

@@ -741,6 +741,8 @@ HAVE_LIBC_MACHINE_CR16_FALSE
 HAVE_LIBC_MACHINE_CR16_TRUE
 HAVE_LIBC_MACHINE_BFIN_FALSE
 HAVE_LIBC_MACHINE_BFIN_TRUE
+HAVE_LIBC_MACHINE_BEXKAT1_FALSE
+HAVE_LIBC_MACHINE_BEXKAT1_TRUE
 HAVE_LIBC_MACHINE_ARM_FALSE
 HAVE_LIBC_MACHINE_ARM_TRUE
 HAVE_LIBC_MACHINE_ARC_FALSE
@@ -5743,6 +5745,13 @@ else
   HAVE_LIBC_MACHINE_ARM_TRUE='#'
   HAVE_LIBC_MACHINE_ARM_FALSE=
 fi
+ if test "${machine_dir}" = bexkat1; then
+  HAVE_LIBC_MACHINE_BEXKAT1_TRUE=
+  HAVE_LIBC_MACHINE_BEXKAT1_FALSE='#'
+else
+  HAVE_LIBC_MACHINE_BEXKAT1_TRUE='#'
+  HAVE_LIBC_MACHINE_BEXKAT1_FALSE=
+fi
  if test "${machine_dir}" = bfin; then
   HAVE_LIBC_MACHINE_BFIN_TRUE=
   HAVE_LIBC_MACHINE_BFIN_FALSE='#'
@@ -7651,6 +7660,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${HAVE_LIBC_MACHINE_ARM_TRUE}" && test -z "${HAVE_LIBC_MACHINE_ARM_FALSE}"; then
   as_fn_error $? "conditional \"HAVE_LIBC_MACHINE_ARM\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${HAVE_LIBC_MACHINE_BEXKAT1_TRUE}" && test -z "${HAVE_LIBC_MACHINE_BEXKAT1_FALSE}"; then
+  as_fn_error $? "conditional \"HAVE_LIBC_MACHINE_BEXKAT1\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${HAVE_LIBC_MACHINE_BFIN_TRUE}" && test -z "${HAVE_LIBC_MACHINE_BFIN_FALSE}"; then
