@@ -125,8 +125,7 @@ case "${target}" in
 	target_makefile_frag=${srcdir}/config/mn10300.mt
 	;;
   bexkat1-*-*)
-	AC_CONFIG_SUBDIRS([bexkat1/Makefile])
-	subdirs="$subdirs bexkat1"
+	config_bexkat1=true
 	;;
   bfin-*-*)
 	config_bfin=true
