@@ -1,0 +1,11 @@
+%rename link_gcc_c_sequence                sim_link_gcc_c_sequence
+
+*sim_libgloss:
+-lsim
+
+*sim_libc:
+-lc
+
+*link_gcc_c_sequence:
+%(sim_link_gcc_c_sequence) --start-group %G %(sim_libc) %(sim_libgloss) --end-group
+
