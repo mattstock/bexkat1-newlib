@@ -648,6 +648,8 @@ CONFIG_D30V_FALSE
 CONFIG_D30V_TRUE
 CONFIG_CSKY_FALSE
 CONFIG_CSKY_TRUE
+CONFIG_BEXKAT1_FALSE
+CONFIG_BEXKAT1_TRUE
 CONFIG_BFIN_FALSE
 CONFIG_BFIN_TRUE
 CONFIG_ARM_FALSE
@@ -3021,6 +3023,14 @@ else
   CONFIG_BFIN_FALSE=
 fi
 
+   if test x$config_bexkat1 = xtrue; then
+  CONFIG_BEXKAT1_TRUE=
+  CONFIG_BEXKAT1_FALSE='#'
+else
+  CONFIG_BEXKAT1_TRUE='#'
+  CONFIG_BEXKAT1_FALSE=
+fi
+
    if test x$config_csky = xtrue; then
   CONFIG_CSKY_TRUE=
   CONFIG_CSKY_FALSE='#'
@@ -5328,6 +5338,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${CONFIG_BFIN_TRUE}" && test -z "${CONFIG_BFIN_FALSE}"; then
   as_fn_error $? "conditional \"CONFIG_BFIN\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${CONFIG_BEXKAT1_TRUE}" && test -z "${CONFIG_BEXKAT1_FALSE}"; then
+  as_fn_error $? "conditional \"CONFIG_BEXKAT1\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${CONFIG_CSKY_TRUE}" && test -z "${CONFIG_CSKY_FALSE}"; then

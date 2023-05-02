@@ -76,6 +76,9 @@ endif
 if CONFIG_ARM
 include arm/Makefile.inc
 endif
+if CONFIG_BEXKAT1
+include bexkat1/Makefile.inc
+endif
 if CONFIG_BFIN
 include bfin/Makefile.inc
 endif

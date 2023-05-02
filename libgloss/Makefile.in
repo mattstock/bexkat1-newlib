@@ -117,13 +117,18 @@ check_PROGRAMS = $(am__EXEEXT_2) $(am__EXEEXT_3)
 @CONFIG_ARM_TRUE@	arm/librdimon.a arm/librdimon-v2m.a
 @CONFIG_ARM_TRUE@am__append_10 = $(arm_SPECS) \
 @CONFIG_ARM_TRUE@	$(arm_cpu_initcpuinit_DATA)
+@CONFIG_BEXKAT1_TRUE@am__append_11 = \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/sim.specs \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/crt0.o
+
+@CONFIG_BEXKAT1_TRUE@am__append_12 = bexkat1/libgloss.a
 
 # Here is all of the simulator stuff.
-@CONFIG_BFIN_TRUE@am__append_11 = bfin/libsim.a bfin/libbfinbsp.a
-@CONFIG_BFIN_TRUE@am__append_12 = bfin/sim-test
+@CONFIG_BFIN_TRUE@am__append_13 = bfin/libsim.a bfin/libbfinbsp.a
+@CONFIG_BFIN_TRUE@am__append_14 = bfin/sim-test
 
 # Here is all of the development board stuff.
-@CONFIG_BFIN_TRUE@am__append_13 = \
+@CONFIG_BFIN_TRUE@am__append_15 = \
 @CONFIG_BFIN_TRUE@	bfin/crt0.o \
 @CONFIG_BFIN_TRUE@	bfin/basiccrt.o \
 @CONFIG_BFIN_TRUE@	bfin/basiccrts.o \
@@ -134,11 +139,11 @@ check_PROGRAMS = $(am__EXEEXT_2) $(am__EXEEXT_3)
 # 	bfin/basiccrt60x.o \
 #	bfin/basiccrt60xs.o \
 #	bfin/basiccrt60xc1.o
-@CONFIG_BFIN_TRUE@am__append_14 = \
+@CONFIG_BFIN_TRUE@am__append_16 = \
 @CONFIG_BFIN_TRUE@	bfin/crt0.S \
 @CONFIG_BFIN_TRUE@	bfin/basiccrt.S
 
-@CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@am__append_15 = \
+@CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@am__append_17 = \
 @CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@	bfin/bfin-common-sc.ld bfin/bfin-common-mc.ld bfin/bfin-common-mc0.ld \
 @CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@	bfin/bf504.ld bfin/bf506.ld \
 @CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@	bfin/bf512.ld bfin/bf514.ld bfin/bf516.ld bfin/bf518.ld \
@@ -154,42 +159,42 @@ check_PROGRAMS = $(am__EXEEXT_2) $(am__EXEEXT_3)
 @CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@	bfin/bf609.ld bfin/bf609c0.ld bfin/bf609c1.ld bfin/bf609m.ld \
 @CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@	bfin/bf592.ld
 
-@CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@am__append_16 = $(wildcard $(srcdir)/bfin/include/*.h)
-@CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@am__append_17 = $(wildcard $(srcdir)/bfin/include/sys/*.h)
-@CONFIG_CSKY_TRUE@am__append_18 = \
+@CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@am__append_18 = $(wildcard $(srcdir)/bfin/include/*.h)
+@CONFIG_BFIN_TRUE@@HAVE_MULTISUBDIR_FALSE@am__append_19 = $(wildcard $(srcdir)/bfin/include/sys/*.h)
+@CONFIG_CSKY_TRUE@am__append_20 = \
 @CONFIG_CSKY_TRUE@	csky/crt0.o
 
-@CONFIG_CSKY_TRUE@am__append_19 = \
+@CONFIG_CSKY_TRUE@am__append_21 = \
 @CONFIG_CSKY_TRUE@	csky/crt0.S
 
-@CONFIG_CSKY_TRUE@am__append_20 = csky/libsemi.a
-@CONFIG_D30V_TRUE@am__append_21 = d30v/libsim.a
-@CONFIG_D30V_TRUE@am__append_22 = \
+@CONFIG_CSKY_TRUE@am__append_22 = csky/libsemi.a
+@CONFIG_D30V_TRUE@am__append_23 = d30v/libsim.a
+@CONFIG_D30V_TRUE@am__append_24 = \
 @CONFIG_D30V_TRUE@	d30v/crt0.o
 
-@CONFIG_IQ2000_TRUE@am__append_23 = iq2000/crt0.o iq2000/sim.ld
-@CONFIG_IQ2000_TRUE@am__append_24 = iq2000/libeval.a
-@CONFIG_IQ2000_TRUE@am__append_25 = iq2000/crt0.S iq2000/test.o
-@CONFIG_IQ2000_TRUE@am__append_26 = iq2000/test
-@CONFIG_LIBNOSYS_TRUE@am__append_27 = libnosys/nosys.specs
-@CONFIG_LIBNOSYS_TRUE@am__append_28 = libnosys/libnosys.a
-@CONFIG_LM32_TRUE@am__append_29 = lm32/crt0.o lm32/sim.ld
-@CONFIG_LM32_TRUE@am__append_30 = lm32/libgloss.a
-@CONFIG_LM32_TRUE@am__append_31 = lm32/crt0.S
-@CONFIG_NIOS2_TRUE@am__append_32 = \
+@CONFIG_IQ2000_TRUE@am__append_25 = iq2000/crt0.o iq2000/sim.ld
+@CONFIG_IQ2000_TRUE@am__append_26 = iq2000/libeval.a
+@CONFIG_IQ2000_TRUE@am__append_27 = iq2000/crt0.S iq2000/test.o
+@CONFIG_IQ2000_TRUE@am__append_28 = iq2000/test
+@CONFIG_LIBNOSYS_TRUE@am__append_29 = libnosys/nosys.specs
+@CONFIG_LIBNOSYS_TRUE@am__append_30 = libnosys/libnosys.a
+@CONFIG_LM32_TRUE@am__append_31 = lm32/crt0.o lm32/sim.ld
+@CONFIG_LM32_TRUE@am__append_32 = lm32/libgloss.a
+@CONFIG_LM32_TRUE@am__append_33 = lm32/crt0.S
+@CONFIG_NIOS2_TRUE@am__append_34 = \
 @CONFIG_NIOS2_TRUE@	nios2/qemu-hosted.ld
 
-@CONFIG_NIOS2_TRUE@am__append_33 = nios2/libnios2.a
-@CONFIG_RISCV_TRUE@am__append_34 = \
+@CONFIG_NIOS2_TRUE@am__append_35 = nios2/libnios2.a
+@CONFIG_RISCV_TRUE@am__append_36 = \
 @CONFIG_RISCV_TRUE@	riscv/nano.specs \
 @CONFIG_RISCV_TRUE@	riscv/sim.specs \
 @CONFIG_RISCV_TRUE@	riscv/semihost.specs \
 @CONFIG_RISCV_TRUE@	riscv/crt0.o
 
-@CONFIG_RISCV_TRUE@am__append_35 = riscv/libgloss.a \
+@CONFIG_RISCV_TRUE@am__append_37 = riscv/libgloss.a \
 @CONFIG_RISCV_TRUE@	riscv/libsemihost.a
-@CONFIG_WINCE_TRUE@am__append_36 = $(gdbdir)
-@CONFIG_WINCE_TRUE@am__append_37 = wince/stub.exe
+@CONFIG_WINCE_TRUE@am__append_38 = $(gdbdir)
+@CONFIG_WINCE_TRUE@am__append_39 = wince/stub.exe
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/../config/depstand.m4 \
@@ -316,6 +321,11 @@ arm_librdpmon_a_LIBADD =
 @CONFIG_ARM_TRUE@	arm/libcfunc.$(OBJEXT) arm/syscalls.$(OBJEXT) \
 @CONFIG_ARM_TRUE@	arm/trap.$(OBJEXT) arm/truncate.$(OBJEXT)
 arm_librdpmon_a_OBJECTS = $(am_arm_librdpmon_a_OBJECTS)
+bexkat1_libgloss_a_AR = $(AR) $(ARFLAGS)
+bexkat1_libgloss_a_LIBADD =
+@CONFIG_BEXKAT1_TRUE@am_bexkat1_libgloss_a_OBJECTS = bexkat1/bexkat1_libgloss_a-sys_exit.$(OBJEXT) \
+@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_sbrk.$(OBJEXT)
+bexkat1_libgloss_a_OBJECTS = $(am_bexkat1_libgloss_a_OBJECTS)
 bfin_libbfinbsp_a_AR = $(AR) $(ARFLAGS)
 bfin_libbfinbsp_a_LIBADD =
 @CONFIG_BFIN_TRUE@am_bfin_libbfinbsp_a_OBJECTS = bfin/bfin_libbfinbsp_a-clear_cache_range.$(OBJEXT) \
@@ -569,13 +579,13 @@ am__v_CCLD_1 =
 SOURCES = $(aarch64_librdimon_a_SOURCES) $(arc_libnsim_a_SOURCES) \
 	$(arm_libgloss_linux_a_SOURCES) $(arm_librdimon_v2m_a_SOURCES) \
 	$(arm_librdimon_a_SOURCES) $(arm_librdpmon_a_SOURCES) \
-	$(bfin_libbfinbsp_a_SOURCES) $(bfin_libsim_a_SOURCES) \
-	$(csky_libsemi_a_SOURCES) $(d30v_libsim_a_SOURCES) \
-	$(iq2000_libeval_a_SOURCES) $(libnosys_libnosys_a_SOURCES) \
-	$(libobjs_a_SOURCES) $(lm32_libgloss_a_SOURCES) \
-	$(nios2_libnios2_a_SOURCES) $(riscv_libgloss_a_SOURCES) \
-	$(riscv_libsemihost_a_SOURCES) bfin/sim-test.c iq2000/test.c \
-	$(wince_stub_exe_SOURCES)
+	$(bexkat1_libgloss_a_SOURCES) $(bfin_libbfinbsp_a_SOURCES) \
+	$(bfin_libsim_a_SOURCES) $(csky_libsemi_a_SOURCES) \
+	$(d30v_libsim_a_SOURCES) $(iq2000_libeval_a_SOURCES) \
+	$(libnosys_libnosys_a_SOURCES) $(libobjs_a_SOURCES) \
+	$(lm32_libgloss_a_SOURCES) $(nios2_libnios2_a_SOURCES) \
+	$(riscv_libgloss_a_SOURCES) $(riscv_libsemihost_a_SOURCES) \
+	bfin/sim-test.c iq2000/test.c $(wince_stub_exe_SOURCES)
 AM_V_DVIPS = $(am__v_DVIPS_@AM_V@)
 am__v_DVIPS_ = $(am__v_DVIPS_@AM_DEFAULT_V@)
 am__v_DVIPS_0 = @echo "  DVIPS   " $@;
@@ -662,7 +672,7 @@ ETAGS = etags
 CTAGS = ctags
 CSCOPE = cscope
 DIST_SUBDIRS = $(SUBDIRS)
-VPATH = @srcdir@ $(am__append_36)
+VPATH = @srcdir@ $(am__append_38)
 AARCH64_OBJTYPE = @AARCH64_OBJTYPE@
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
@@ -795,26 +805,27 @@ srcroot = $(top_srcdir)/..
 tooldir = $(exec_prefix)/$(target_alias)
 multilibtooldir = $(tooldir)/lib$(MULTISUBDIR)
 multilibtool_DATA = $(am__append_3) $(am__append_6) $(am__append_7) \
-	$(am__append_8) $(am__append_13) $(am__append_15) \
-	$(am__append_18) $(am__append_22) $(am__append_23) \
-	$(am__append_27) $(am__append_29) $(am__append_32) \
-	$(am__append_34)
+	$(am__append_8) $(am__append_11) $(am__append_15) \
+	$(am__append_17) $(am__append_20) $(am__append_24) \
+	$(am__append_25) $(am__append_29) $(am__append_31) \
+	$(am__append_34) $(am__append_36)
 multilibtool_LIBRARIES = $(am__append_2) $(am__append_5) \
-	$(am__append_9) $(am__append_11) $(am__append_20) \
-	$(am__append_21) $(am__append_24) $(am__append_28) \
-	$(am__append_30) $(am__append_33) $(am__append_35)
+	$(am__append_9) $(am__append_12) $(am__append_13) \
+	$(am__append_22) $(am__append_23) $(am__append_26) \
+	$(am__append_30) $(am__append_32) $(am__append_35) \
+	$(am__append_37)
 includetooldir = $(tooldir)/include
-includetool_DATA = $(am__append_16)
+includetool_DATA = $(am__append_18)
 includesystooldir = $(tooldir)/include/sys
-includesystool_DATA = $(am__append_17)
+includesystool_DATA = $(am__append_19)
 @NEED_TOP_INCLUDE_DIR_FALSE@AM_CPPFLAGS = 
 @NEED_TOP_INCLUDE_DIR_TRUE@AM_CPPFLAGS = -idirafter $(srcroot)/include
 
 # A fake library so automake will generate rules for plain objects that we want
 # to install (e.g. our crt0.o objects).
 noinst_LIBRARIES = libobjs.a
-libobjs_a_SOURCES = $(am__append_14) $(am__append_19) $(am__append_25) \
-	$(am__append_31)
+libobjs_a_SOURCES = $(am__append_16) $(am__append_21) $(am__append_27) \
+	$(am__append_33)
 FLAGS_TO_PASS = \
 	"CC=$(CC)" \
 	"CFLAGS=$(CFLAGS)" \
@@ -907,6 +918,15 @@ TEXINFO_TEX = ../texinfo/texinfo.tex
 @CONFIG_ARM_TRUE@arm_cpu_initcpuinit_DATA = \
 @CONFIG_ARM_TRUE@	arm/cpu-init/rdimon-aem.o
 
+@CONFIG_BEXKAT1_TRUE@bexkat1_libgloss_a_CPPFLAGS = -I$(srcdir)/bexkat1
+@CONFIG_BEXKAT1_TRUE@bexkat1_libgloss_a_SOURCES = \
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_exit.c \
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_sbrk.c
+
+@CONFIG_BEXKAT1_TRUE@includemachinetooldir = $(tooldir)/include/machine
+@CONFIG_RISCV_TRUE@includemachinetooldir = $(tooldir)/include/machine
+@CONFIG_BEXKAT1_TRUE@includemachinetool_DATA = bexkat1/machine/syscall.h
+@CONFIG_RISCV_TRUE@includemachinetool_DATA = riscv/machine/syscall.h
 @CONFIG_BFIN_TRUE@bfin_CPPFLAGS = -I$(srcdir)/bfin/include
 @CONFIG_BFIN_TRUE@bfin_libsim_a_SOURCES = \
 @CONFIG_BFIN_TRUE@	bfin/clear_cache_range.c \
@@ -1087,8 +1107,6 @@ TEXINFO_TEX = ../texinfo/texinfo.tex
 @CONFIG_RISCV_TRUE@	riscv/semihost-sys_unlink.c \
 @CONFIG_RISCV_TRUE@	riscv/semihost-sys_write.c
 
-@CONFIG_RISCV_TRUE@includemachinetooldir = $(tooldir)/include/machine
-@CONFIG_RISCV_TRUE@includemachinetool_DATA = riscv/machine/syscall.h
 @CONFIG_WINCE_TRUE@gdbdir = ${dir ${patsubst %/,%,${dir @srcdir@}}}gdb
 @CONFIG_WINCE_TRUE@wince_stub_exe_SOURCES = wince-stub.c
 @CONFIG_WINCE_TRUE@wince_stub_exe_CPPFLAGS = $(AM_CPPFLAGS) -I$(gdbdir)
@@ -1100,7 +1118,7 @@ all: config.h
 .SUFFIXES: .S .c .dvi .o .obj .ps
 am--refresh: Makefile
 	@:
-$(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am $(top_srcdir)/../multilib.am $(srcdir)/doc/Makefile.inc $(srcdir)/aarch64/Makefile.inc $(srcdir)/aarch64/cpu-init/Makefile.inc $(srcdir)/arc/Makefile.inc $(srcdir)/arm/Makefile.inc $(srcdir)/arm/cpu-init/Makefile.inc $(srcdir)/bfin/Makefile.inc $(srcdir)/csky/Makefile.inc $(srcdir)/d30v/Makefile.inc $(srcdir)/iq2000/Makefile.inc $(srcdir)/libnosys/Makefile.inc $(srcdir)/lm32/Makefile.inc $(srcdir)/nios2/Makefile.inc $(srcdir)/riscv/Makefile.inc $(srcdir)/wince/Makefile.inc $(am__configure_deps)
+$(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.am $(top_srcdir)/../multilib.am $(srcdir)/doc/Makefile.inc $(srcdir)/aarch64/Makefile.inc $(srcdir)/aarch64/cpu-init/Makefile.inc $(srcdir)/arc/Makefile.inc $(srcdir)/arm/Makefile.inc $(srcdir)/arm/cpu-init/Makefile.inc $(srcdir)/bexkat1/Makefile.inc $(srcdir)/bfin/Makefile.inc $(srcdir)/csky/Makefile.inc $(srcdir)/d30v/Makefile.inc $(srcdir)/iq2000/Makefile.inc $(srcdir)/libnosys/Makefile.inc $(srcdir)/lm32/Makefile.inc $(srcdir)/nios2/Makefile.inc $(srcdir)/riscv/Makefile.inc $(srcdir)/wince/Makefile.inc $(am__configure_deps)
 	@for dep in $?; do \
 	  case '$(am__configure_deps)' in \
 	    *$$dep*) \
@@ -1122,7 +1140,7 @@ Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	    echo ' cd $(top_builddir) && $(SHELL) ./config.status $@ $(am__depfiles_maybe)'; \
 	    cd $(top_builddir) && $(SHELL) ./config.status $@ $(am__depfiles_maybe);; \
 	esac;
-$(top_srcdir)/../multilib.am $(srcdir)/doc/Makefile.inc $(srcdir)/aarch64/Makefile.inc $(srcdir)/aarch64/cpu-init/Makefile.inc $(srcdir)/arc/Makefile.inc $(srcdir)/arm/Makefile.inc $(srcdir)/arm/cpu-init/Makefile.inc $(srcdir)/bfin/Makefile.inc $(srcdir)/csky/Makefile.inc $(srcdir)/d30v/Makefile.inc $(srcdir)/iq2000/Makefile.inc $(srcdir)/libnosys/Makefile.inc $(srcdir)/lm32/Makefile.inc $(srcdir)/nios2/Makefile.inc $(srcdir)/riscv/Makefile.inc $(srcdir)/wince/Makefile.inc $(am__empty):
+$(top_srcdir)/../multilib.am $(srcdir)/doc/Makefile.inc $(srcdir)/aarch64/Makefile.inc $(srcdir)/aarch64/cpu-init/Makefile.inc $(srcdir)/arc/Makefile.inc $(srcdir)/arm/Makefile.inc $(srcdir)/arm/cpu-init/Makefile.inc $(srcdir)/bexkat1/Makefile.inc $(srcdir)/bfin/Makefile.inc $(srcdir)/csky/Makefile.inc $(srcdir)/d30v/Makefile.inc $(srcdir)/iq2000/Makefile.inc $(srcdir)/libnosys/Makefile.inc $(srcdir)/lm32/Makefile.inc $(srcdir)/nios2/Makefile.inc $(srcdir)/riscv/Makefile.inc $(srcdir)/wince/Makefile.inc $(am__empty):
 
 $(top_builddir)/config.status: $(top_srcdir)/configure $(CONFIG_STATUS_DEPENDENCIES)
 	$(SHELL) ./config.status --recheck
@@ -1365,6 +1383,21 @@ arm/librdpmon.a: $(arm_librdpmon_a_OBJECTS) $(arm_librdpmon_a_DEPENDENCIES) $(EX
 	$(AM_V_at)-rm -f arm/librdpmon.a
 	$(AM_V_AR)$(arm_librdpmon_a_AR) arm/librdpmon.a $(arm_librdpmon_a_OBJECTS) $(arm_librdpmon_a_LIBADD)
 	$(AM_V_at)$(RANLIB) arm/librdpmon.a
+bexkat1/$(am__dirstamp):
+	@$(MKDIR_P) bexkat1
+	@: > bexkat1/$(am__dirstamp)
+bexkat1/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) bexkat1/$(DEPDIR)
+	@: > bexkat1/$(DEPDIR)/$(am__dirstamp)
+bexkat1/bexkat1_libgloss_a-sys_exit.$(OBJEXT):  \
+	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
+bexkat1/bexkat1_libgloss_a-sys_sbrk.$(OBJEXT):  \
+	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
+
+bexkat1/libgloss.a: $(bexkat1_libgloss_a_OBJECTS) $(bexkat1_libgloss_a_DEPENDENCIES) $(EXTRA_bexkat1_libgloss_a_DEPENDENCIES) bexkat1/$(am__dirstamp)
+	$(AM_V_at)-rm -f bexkat1/libgloss.a
+	$(AM_V_AR)$(bexkat1_libgloss_a_AR) bexkat1/libgloss.a $(bexkat1_libgloss_a_OBJECTS) $(bexkat1_libgloss_a_LIBADD)
+	$(AM_V_at)$(RANLIB) bexkat1/libgloss.a
 bfin/$(am__dirstamp):
 	@$(MKDIR_P) bfin
 	@: > bfin/$(am__dirstamp)
@@ -1848,6 +1881,7 @@ mostlyclean-compile:
 	-rm -f aarch64/*.$(OBJEXT)
 	-rm -f arc/*.$(OBJEXT)
 	-rm -f arm/*.$(OBJEXT)
+	-rm -f bexkat1/*.$(OBJEXT)
 	-rm -f bfin/*.$(OBJEXT)
 	-rm -f csky/*.$(OBJEXT)
 	-rm -f d30v/*.$(OBJEXT)
@@ -1898,6 +1932,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@arm/$(DEPDIR)/syscalls.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@arm/$(DEPDIR)/trap.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@arm/$(DEPDIR)/truncate.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bfin/$(DEPDIR)/basiccrt.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bfin/$(DEPDIR)/bfin_libbfinbsp_a-_exit.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bfin/$(DEPDIR)/bfin_libbfinbsp_a-clear_cache_range.Po@am__quote@
@@ -2409,6 +2445,34 @@ arm/arm_librdimon_a-truncate.obj: arm/truncate.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='arm/truncate.c' object='arm/arm_librdimon_a-truncate.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(arm_librdimon_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o arm/arm_librdimon_a-truncate.obj `if test -f 'arm/truncate.c'; then $(CYGPATH_W) 'arm/truncate.c'; else $(CYGPATH_W) '$(srcdir)/arm/truncate.c'; fi`
+
+bexkat1/bexkat1_libgloss_a-sys_exit.o: bexkat1/sys_exit.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_exit.o -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_exit.o `test -f 'bexkat1/sys_exit.c' || echo '$(srcdir)/'`bexkat1/sys_exit.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_exit.c' object='bexkat1/bexkat1_libgloss_a-sys_exit.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_exit.o `test -f 'bexkat1/sys_exit.c' || echo '$(srcdir)/'`bexkat1/sys_exit.c
+
+bexkat1/bexkat1_libgloss_a-sys_exit.obj: bexkat1/sys_exit.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_exit.obj -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_exit.obj `if test -f 'bexkat1/sys_exit.c'; then $(CYGPATH_W) 'bexkat1/sys_exit.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_exit.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_exit.c' object='bexkat1/bexkat1_libgloss_a-sys_exit.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_exit.obj `if test -f 'bexkat1/sys_exit.c'; then $(CYGPATH_W) 'bexkat1/sys_exit.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_exit.c'; fi`
+
+bexkat1/bexkat1_libgloss_a-sys_sbrk.o: bexkat1/sys_sbrk.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_sbrk.o -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_sbrk.o `test -f 'bexkat1/sys_sbrk.c' || echo '$(srcdir)/'`bexkat1/sys_sbrk.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_sbrk.c' object='bexkat1/bexkat1_libgloss_a-sys_sbrk.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_sbrk.o `test -f 'bexkat1/sys_sbrk.c' || echo '$(srcdir)/'`bexkat1/sys_sbrk.c
+
+bexkat1/bexkat1_libgloss_a-sys_sbrk.obj: bexkat1/sys_sbrk.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_sbrk.obj -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_sbrk.obj `if test -f 'bexkat1/sys_sbrk.c'; then $(CYGPATH_W) 'bexkat1/sys_sbrk.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_sbrk.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_sbrk.c' object='bexkat1/bexkat1_libgloss_a-sys_sbrk.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_sbrk.obj `if test -f 'bexkat1/sys_sbrk.c'; then $(CYGPATH_W) 'bexkat1/sys_sbrk.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_sbrk.c'; fi`
 
 bfin/bfin_libbfinbsp_a-clear_cache_range.o: bfin/clear_cache_range.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bfin_libbfinbsp_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bfin/bfin_libbfinbsp_a-clear_cache_range.o -MD -MP -MF bfin/$(DEPDIR)/bfin_libbfinbsp_a-clear_cache_range.Tpo -c -o bfin/bfin_libbfinbsp_a-clear_cache_range.o `test -f 'bfin/clear_cache_range.c' || echo '$(srcdir)/'`bfin/clear_cache_range.c
@@ -4210,6 +4274,8 @@ distclean-generic:
 	-rm -f arc/$(am__dirstamp)
 	-rm -f arm/$(DEPDIR)/$(am__dirstamp)
 	-rm -f arm/$(am__dirstamp)
+	-rm -f bexkat1/$(DEPDIR)/$(am__dirstamp)
+	-rm -f bexkat1/$(am__dirstamp)
 	-rm -f bfin/$(DEPDIR)/$(am__dirstamp)
 	-rm -f bfin/$(am__dirstamp)
 	-rm -f csky/$(DEPDIR)/$(am__dirstamp)
@@ -4240,7 +4306,7 @@ clean-am: clean-aminfo clean-binPROGRAMS clean-checkPROGRAMS \
 
 distclean: distclean-recursive
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf ./$(DEPDIR) aarch64/$(DEPDIR) arc/$(DEPDIR) arm/$(DEPDIR) bfin/$(DEPDIR) csky/$(DEPDIR) d30v/$(DEPDIR) iq2000/$(DEPDIR) libnosys/$(DEPDIR) lm32/$(DEPDIR) nios2/$(DEPDIR) riscv/$(DEPDIR)
+	-rm -rf ./$(DEPDIR) aarch64/$(DEPDIR) arc/$(DEPDIR) arm/$(DEPDIR) bexkat1/$(DEPDIR) bfin/$(DEPDIR) csky/$(DEPDIR) d30v/$(DEPDIR) iq2000/$(DEPDIR) libnosys/$(DEPDIR) lm32/$(DEPDIR) nios2/$(DEPDIR) riscv/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-hdr distclean-local distclean-tags
@@ -4383,7 +4449,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-recursive
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf ./$(DEPDIR) aarch64/$(DEPDIR) arc/$(DEPDIR) arm/$(DEPDIR) bfin/$(DEPDIR) csky/$(DEPDIR) d30v/$(DEPDIR) iq2000/$(DEPDIR) libnosys/$(DEPDIR) lm32/$(DEPDIR) nios2/$(DEPDIR) riscv/$(DEPDIR)
+	-rm -rf ./$(DEPDIR) aarch64/$(DEPDIR) arc/$(DEPDIR) arm/$(DEPDIR) bexkat1/$(DEPDIR) bfin/$(DEPDIR) csky/$(DEPDIR) d30v/$(DEPDIR) iq2000/$(DEPDIR) libnosys/$(DEPDIR) lm32/$(DEPDIR) nios2/$(DEPDIR) riscv/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-aminfo \
 	maintainer-clean-generic maintainer-clean-local

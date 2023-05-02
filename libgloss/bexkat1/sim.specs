@@ -1,11 +1,8 @@
-%rename link_gcc_c_sequence                sim_link_gcc_c_sequence
+%rename lib	sim_lib
+%rename link	sim_link
 
-*sim_libgloss:
--lsim
+*lib:
+--start-group -lc -lsim --end-group
 
-*sim_libc:
--lc
-
-*link_gcc_c_sequence:
-%(sim_link_gcc_c_sequence) --start-group %G %(sim_libc) %(sim_libgloss) --end-group
-
+*link:
+%(sim_link) %:replace-outfile(-lgloss -lsim)

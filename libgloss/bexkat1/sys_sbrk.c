@@ -1,26 +1,7 @@
-/* sbrk.c -- allocate memory dynamically.
- * 
- * Copyright (c) 2008 Anthony Green
- *
- * The authors hereby grant permission to use, copy, modify, distribute,
- * and license this software and its documentation for any purpose, provided
- * that existing copyright notices are retained in all copies and that this
- * notice is included verbatim in any distributions. No written agreement,
- * license, or royalty fee is required for any of the authorized uses.
- * Modifications to this software may be copyrighted by their authors
- * and need not follow the licensing terms described here, provided that
- * the new terms are clearly indicated on the first page of each file where
- * they apply.
- */
-#include <errno.h>
-#include "glue.h"
+#ifdef USING_SIM_SPECS
 
-/* just in case, most boards have at least some memory */
-#ifndef RAMSIZE
-#  define RAMSIZE             (caddr_t)0x100000
-#endif
-
-char *__heap_ptr = (char *)&_end;
+extern char _end[];
+char *heap_ptr;
 
 /*
  * sbrk -- changes heap size size. Get nbytes more
@@ -32,23 +13,38 @@ _sbrk (nbytes)
      int nbytes;
 {
   char *base;
-  char *sp;
 
-  base = __heap_ptr;
-  __heap_ptr += nbytes;
+  if (!heap_ptr)
+    heap_ptr = (char *)&end;
+  base = heap_ptr;
+  heap_ptr += nbytes;
 
   return base;
-/* FIXME: We really want to make sure we don't run out of RAM, but this
- *       isn't very portable.
- */
-#if 0
-  if ((RAMSIZE - heap_ptr - nbytes) >= 0) {
-    base = heap_ptr;
-    heap_ptr += nbytes;
-    return (base);
-  } else {
-    errno = ENOMEM;
-    return ((char *)-1);
-  }
-#endif
 }
+
+#else
+
+#include <machine/syscall.h>
+#include <sys/types.h>
+#include "internal_syscall.h"
+
+void *
+_sbrk (ptrdiff_t incr)
+{
+  static unsigned long heap_end;
+
+  if (heap_end == 0)
+    {
+      long brk = __internal_syscall (SYS_brk, 0);
+      if (brk == -1)
+	return (void *)__syscall_error (-ENOMEM);
+      heap_end = brk;
+    }
+
+  if (__internal_syscall (SYS_brk, heap_end + incr) != heap_end + incr)
+    return (void *)__syscall_error (-ENOMEM);
+
+  return (void *)(heap_end - incr);
+}
+
+#endif
