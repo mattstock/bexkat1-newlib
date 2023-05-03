@@ -1,4 +1,0 @@
-%rename lib	sim_lib
-
-*lib:
---start-group -lc -lgloss --end-group

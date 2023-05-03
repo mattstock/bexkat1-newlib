@@ -1,5 +1,9 @@
 multilibtool_DATA += \
-		  %D%/sim.specs \
+		  %D%/mister.specs \
+		  %D%/verilator.ld \
+		  %D%/bexkat1-elf-common.ld \
+		  %D%/mister-rom.ld \
+		  %D%/mister.ld \
 		  %D%/crt0.o
 
 multilibtool_LIBRARIES += %D%/libgloss.a

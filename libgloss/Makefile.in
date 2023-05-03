@@ -118,7 +118,11 @@ check_PROGRAMS = $(am__EXEEXT_2) $(am__EXEEXT_3)
 @CONFIG_ARM_TRUE@am__append_10 = $(arm_SPECS) \
 @CONFIG_ARM_TRUE@	$(arm_cpu_initcpuinit_DATA)
 @CONFIG_BEXKAT1_TRUE@am__append_11 = \
-@CONFIG_BEXKAT1_TRUE@		  bexkat1/sim.specs \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/mister.specs \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/verilator.ld \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/bexkat1-elf-common.ld \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/mister-rom.ld \
+@CONFIG_BEXKAT1_TRUE@		  bexkat1/mister.ld \
 @CONFIG_BEXKAT1_TRUE@		  bexkat1/crt0.o
 
 @CONFIG_BEXKAT1_TRUE@am__append_12 = bexkat1/libgloss.a

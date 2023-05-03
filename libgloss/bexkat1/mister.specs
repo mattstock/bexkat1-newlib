@@ -1,11 +1,14 @@
 %rename link_gcc_c_sequence                mister_link_gcc_c_sequence
+%rename link				   mister_link
 
 *mister_libgloss:
--lsupport -lrawsd -lmister
+-lgloss
 
 *mister_libc:
--lc
+%{!specs=nano.specs:-lc} %{specs=nano.specs:-lc_nano}
 
 *link_gcc_c_sequence:
 %(mister_link_gcc_c_sequence) --start-group %G %(mister_libc) %(mister_libgloss) --end-group
 
+*link:
+%(mister_link) -T mister.ld
