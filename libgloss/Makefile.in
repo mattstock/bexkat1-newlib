@@ -324,7 +324,11 @@ arm_librdpmon_a_OBJECTS = $(am_arm_librdpmon_a_OBJECTS)
 bexkat1_libgloss_a_AR = $(AR) $(ARFLAGS)
 bexkat1_libgloss_a_LIBADD =
 @CONFIG_BEXKAT1_TRUE@am_bexkat1_libgloss_a_OBJECTS = bexkat1/bexkat1_libgloss_a-sys_exit.$(OBJEXT) \
-@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_sbrk.$(OBJEXT)
+@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_sbrk.$(OBJEXT) \
+@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_close.$(OBJEXT) \
+@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_lseek.$(OBJEXT) \
+@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_read.$(OBJEXT) \
+@CONFIG_BEXKAT1_TRUE@	bexkat1/bexkat1_libgloss_a-sys_write.$(OBJEXT)
 bexkat1_libgloss_a_OBJECTS = $(am_bexkat1_libgloss_a_OBJECTS)
 bfin_libbfinbsp_a_AR = $(AR) $(ARFLAGS)
 bfin_libbfinbsp_a_LIBADD =
@@ -921,7 +925,11 @@ TEXINFO_TEX = ../texinfo/texinfo.tex
 @CONFIG_BEXKAT1_TRUE@bexkat1_libgloss_a_CPPFLAGS = -I$(srcdir)/bexkat1
 @CONFIG_BEXKAT1_TRUE@bexkat1_libgloss_a_SOURCES = \
 @CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_exit.c \
-@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_sbrk.c
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_sbrk.c \
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_close.c \
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_lseek.c \
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_read.c \
+@CONFIG_BEXKAT1_TRUE@		       bexkat1/sys_write.c
 
 @CONFIG_BEXKAT1_TRUE@includemachinetooldir = $(tooldir)/include/machine
 @CONFIG_RISCV_TRUE@includemachinetooldir = $(tooldir)/include/machine
@@ -1392,6 +1400,14 @@ bexkat1/$(DEPDIR)/$(am__dirstamp):
 bexkat1/bexkat1_libgloss_a-sys_exit.$(OBJEXT):  \
 	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
 bexkat1/bexkat1_libgloss_a-sys_sbrk.$(OBJEXT):  \
+	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
+bexkat1/bexkat1_libgloss_a-sys_close.$(OBJEXT):  \
+	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
+bexkat1/bexkat1_libgloss_a-sys_lseek.$(OBJEXT):  \
+	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
+bexkat1/bexkat1_libgloss_a-sys_read.$(OBJEXT):  \
+	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
+bexkat1/bexkat1_libgloss_a-sys_write.$(OBJEXT):  \
 	bexkat1/$(am__dirstamp) bexkat1/$(DEPDIR)/$(am__dirstamp)
 
 bexkat1/libgloss.a: $(bexkat1_libgloss_a_OBJECTS) $(bexkat1_libgloss_a_DEPENDENCIES) $(EXTRA_bexkat1_libgloss_a_DEPENDENCIES) bexkat1/$(am__dirstamp)
@@ -1932,8 +1948,12 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@arm/$(DEPDIR)/syscalls.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@arm/$(DEPDIR)/trap.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@arm/$(DEPDIR)/truncate.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_exit.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_sbrk.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bfin/$(DEPDIR)/basiccrt.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bfin/$(DEPDIR)/bfin_libbfinbsp_a-_exit.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@bfin/$(DEPDIR)/bfin_libbfinbsp_a-clear_cache_range.Po@am__quote@
@@ -2473,6 +2493,62 @@ bexkat1/bexkat1_libgloss_a-sys_sbrk.obj: bexkat1/sys_sbrk.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_sbrk.c' object='bexkat1/bexkat1_libgloss_a-sys_sbrk.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_sbrk.obj `if test -f 'bexkat1/sys_sbrk.c'; then $(CYGPATH_W) 'bexkat1/sys_sbrk.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_sbrk.c'; fi`
+
+bexkat1/bexkat1_libgloss_a-sys_close.o: bexkat1/sys_close.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_close.o -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_close.o `test -f 'bexkat1/sys_close.c' || echo '$(srcdir)/'`bexkat1/sys_close.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_close.c' object='bexkat1/bexkat1_libgloss_a-sys_close.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_close.o `test -f 'bexkat1/sys_close.c' || echo '$(srcdir)/'`bexkat1/sys_close.c
+
+bexkat1/bexkat1_libgloss_a-sys_close.obj: bexkat1/sys_close.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_close.obj -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_close.obj `if test -f 'bexkat1/sys_close.c'; then $(CYGPATH_W) 'bexkat1/sys_close.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_close.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_close.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_close.c' object='bexkat1/bexkat1_libgloss_a-sys_close.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_close.obj `if test -f 'bexkat1/sys_close.c'; then $(CYGPATH_W) 'bexkat1/sys_close.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_close.c'; fi`
+
+bexkat1/bexkat1_libgloss_a-sys_lseek.o: bexkat1/sys_lseek.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_lseek.o -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_lseek.o `test -f 'bexkat1/sys_lseek.c' || echo '$(srcdir)/'`bexkat1/sys_lseek.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_lseek.c' object='bexkat1/bexkat1_libgloss_a-sys_lseek.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_lseek.o `test -f 'bexkat1/sys_lseek.c' || echo '$(srcdir)/'`bexkat1/sys_lseek.c
+
+bexkat1/bexkat1_libgloss_a-sys_lseek.obj: bexkat1/sys_lseek.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_lseek.obj -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_lseek.obj `if test -f 'bexkat1/sys_lseek.c'; then $(CYGPATH_W) 'bexkat1/sys_lseek.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_lseek.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_lseek.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_lseek.c' object='bexkat1/bexkat1_libgloss_a-sys_lseek.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_lseek.obj `if test -f 'bexkat1/sys_lseek.c'; then $(CYGPATH_W) 'bexkat1/sys_lseek.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_lseek.c'; fi`
+
+bexkat1/bexkat1_libgloss_a-sys_read.o: bexkat1/sys_read.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_read.o -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_read.o `test -f 'bexkat1/sys_read.c' || echo '$(srcdir)/'`bexkat1/sys_read.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_read.c' object='bexkat1/bexkat1_libgloss_a-sys_read.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_read.o `test -f 'bexkat1/sys_read.c' || echo '$(srcdir)/'`bexkat1/sys_read.c
+
+bexkat1/bexkat1_libgloss_a-sys_read.obj: bexkat1/sys_read.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_read.obj -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_read.obj `if test -f 'bexkat1/sys_read.c'; then $(CYGPATH_W) 'bexkat1/sys_read.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_read.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_read.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_read.c' object='bexkat1/bexkat1_libgloss_a-sys_read.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_read.obj `if test -f 'bexkat1/sys_read.c'; then $(CYGPATH_W) 'bexkat1/sys_read.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_read.c'; fi`
+
+bexkat1/bexkat1_libgloss_a-sys_write.o: bexkat1/sys_write.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_write.o -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_write.o `test -f 'bexkat1/sys_write.c' || echo '$(srcdir)/'`bexkat1/sys_write.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_write.c' object='bexkat1/bexkat1_libgloss_a-sys_write.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_write.o `test -f 'bexkat1/sys_write.c' || echo '$(srcdir)/'`bexkat1/sys_write.c
+
+bexkat1/bexkat1_libgloss_a-sys_write.obj: bexkat1/sys_write.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bexkat1/bexkat1_libgloss_a-sys_write.obj -MD -MP -MF bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Tpo -c -o bexkat1/bexkat1_libgloss_a-sys_write.obj `if test -f 'bexkat1/sys_write.c'; then $(CYGPATH_W) 'bexkat1/sys_write.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_write.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Tpo bexkat1/$(DEPDIR)/bexkat1_libgloss_a-sys_write.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='bexkat1/sys_write.c' object='bexkat1/bexkat1_libgloss_a-sys_write.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bexkat1_libgloss_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o bexkat1/bexkat1_libgloss_a-sys_write.obj `if test -f 'bexkat1/sys_write.c'; then $(CYGPATH_W) 'bexkat1/sys_write.c'; else $(CYGPATH_W) '$(srcdir)/bexkat1/sys_write.c'; fi`
 
 bfin/bfin_libbfinbsp_a-clear_cache_range.o: bfin/clear_cache_range.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(bfin_libbfinbsp_a_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT bfin/bfin_libbfinbsp_a-clear_cache_range.o -MD -MP -MF bfin/$(DEPDIR)/bfin_libbfinbsp_a-clear_cache_range.Tpo -c -o bfin/bfin_libbfinbsp_a-clear_cache_range.o `test -f 'bfin/clear_cache_range.c' || echo '$(srcdir)/'`bfin/clear_cache_range.c
